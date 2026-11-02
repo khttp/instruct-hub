@@ -22,13 +22,17 @@ export default async function proxy(request: NextRequest) {
 
   // Root platform domains (adjust via NEXT_PUBLIC_ROOT_DOMAIN in env)
   const rootDomain = process.env.NEXT_PUBLIC_ROOT_DOMAIN || 'localhost';
+  const isVercelDeploymentHost = hostname.endsWith('.vercel.app');
 
   // Determine subdomain
   let currentHost: string | null = null;
 
   if (process.env.NODE_ENV === 'production') {
     // In production, match against root domain (e.g. platform.com)
-    if (hostname.endsWith(`.${rootDomain}`)) {
+    if (isVercelDeploymentHost) {
+      // Vercel deployment URLs serve the platform itself, not a tenant.
+      currentHost = null;
+    } else if (hostname.endsWith(`.${rootDomain}`)) {
       currentHost = hostname.replace(`.${rootDomain}`, '');
     } else if (hostname !== rootDomain && hostname !== `www.${rootDomain}`) {
       // Custom domain support (e.g., physics-academy.com)
