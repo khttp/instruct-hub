@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { initialTenants, initialCourses, initialLectures } from '@/lib/data-store';
@@ -12,6 +12,8 @@ import { LanguageToggle } from '@/components/LanguageToggle';
 import { setActiveStudentSession, useStudentSession } from '@/lib/student-auth';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
 import { getTenantUrl } from '@/lib/tenant-url';
+import { supabase } from '@/lib/supabase/client';
+import { Course, Lecture, Tenant } from '@/types/database';
 
 export default function CourseDetailsPage() {
   const params = useParams();
@@ -29,13 +31,103 @@ export default function CourseDetailsPage() {
   const t = translations[locale].courseDetails;
   const isRtl = locale === 'ar';
 
-  const tenant = initialTenants[subdomain] || initialTenants['physics-pro'];
-  const course = initialCourses.find((c) => c.id === courseId) || initialCourses[0];
-  const lectures = initialLectures.filter((l) => l.course_id === course.id);
-
-  const [activePreviewLecture, setActivePreviewLecture] = useState(
-    lectures.find((l) => l.is_free_preview) || null
+  const knownTenant = initialTenants[subdomain] ?? null;
+  const knownCourse = knownTenant
+    ? initialCourses.find((item) => item.id === courseId && item.tenant_id === knownTenant.id) ?? null
+    : null;
+  const [tenant, setTenant] = useState<Tenant | null>(knownTenant);
+  const [course, setCourse] = useState<Course | null>(knownCourse);
+  const [lectures, setLectures] = useState<Lecture[]>(
+    knownCourse ? initialLectures.filter((item) => item.course_id === knownCourse.id) : []
   );
+  const [pageStatus, setPageStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>(
+    'loading'
+  );
+  const [activePreviewLecture, setActivePreviewLecture] = useState<Lecture | null>(
+    knownCourse
+      ? initialLectures.find((item) => item.course_id === knownCourse.id && item.is_free_preview) ?? null
+      : null
+  );
+
+  useEffect(() => {
+    let active = true;
+    const showDemoCourse = () => {
+      if (!active || !knownTenant || !knownCourse) return false;
+      const demoLectures = initialLectures.filter((item) => item.course_id === knownCourse.id);
+      setTenant(knownTenant);
+      setCourse(knownCourse);
+      setLectures(demoLectures);
+      setActivePreviewLecture(demoLectures.find((item) => item.is_free_preview) ?? null);
+      setPageStatus('ready');
+      return true;
+    };
+
+    void (async () => {
+      try {
+        const { data: tenantData, error: tenantError } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('subdomain', subdomain)
+          .maybeSingle();
+        if (tenantError) throw tenantError;
+        if (!tenantData) {
+          if (!showDemoCourse()) setPageStatus('not-found');
+          return;
+        }
+
+        const { data: courseData, error: courseError } = await supabase
+          .from('courses')
+          .select('*')
+          .eq('id', courseId)
+          .eq('tenant_id', tenantData.id)
+          .maybeSingle();
+        if (courseError) throw courseError;
+        if (!courseData) {
+          if (!showDemoCourse()) setPageStatus('not-found');
+          return;
+        }
+
+        const { data: lectureData, error: lecturesError } = await supabase
+          .from('lectures')
+          .select('*')
+          .eq('course_id', courseId)
+          .order('sort_order', { ascending: true });
+        if (lecturesError) throw lecturesError;
+        if (!active) return;
+
+        const loadedLectures = (lectureData ?? []) as Lecture[];
+        setTenant(tenantData as Tenant);
+        setCourse(courseData as Course);
+        setLectures(loadedLectures);
+        setActivePreviewLecture(loadedLectures.find((item) => item.is_free_preview) ?? null);
+        setPageStatus('ready');
+      } catch (error) {
+        if (!active) return;
+        console.error('Could not load academy course:', error);
+        if (!showDemoCourse()) setPageStatus('error');
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [courseId, knownCourse, knownTenant, subdomain]);
+
+  if (pageStatus !== 'ready' || !tenant || !course) {
+    const message = pageStatus === 'loading'
+      ? (isRtl ? 'جارٍ تحميل الكورس...' : 'Loading course...')
+      : pageStatus === 'not-found'
+        ? (isRtl ? 'لم يتم العثور على هذا الكورس.' : 'This course was not found.')
+        : (isRtl ? 'تعذر تحميل الكورس. حاول مرة أخرى لاحقاً.' : 'Could not load this course. Please try again later.');
+    return (
+      <main dir={isRtl ? 'rtl' : 'ltr'} className="min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <p role={pageStatus === 'error' ? 'alert' : 'status'}>{message}</p>
+        <Link href={`/tenants/${encodeURIComponent(subdomain)}`} className="text-sky-400 hover:text-sky-300">
+          {isRtl ? 'العودة إلى الموقع' : 'Back to academy'}
+        </Link>
+      </main>
+    );
+  }
 
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="min-h-screen bg-slate-950 text-slate-100 pb-20">
@@ -88,9 +180,23 @@ export default function CourseDetailsPage() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+        {!course.is_published && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {isRtl
+              ? 'معاينة مسودة: هذا الكورس غير منشور ولن يظهر للطلاب حتى تنشره من لوحة التحكم.'
+              : 'Draft preview: students cannot see this course until you publish it from the dashboard.'}
+          </div>
+        )}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Left Section: Video Preview + Syllabus */}
           <div className="lg:col-span-2 space-y-8">
+            {course.thumbnail_url && (
+              <img
+                src={course.thumbnail_url}
+                alt={course.title}
+                className="aspect-video w-full rounded-2xl border border-slate-800 bg-slate-900 object-cover"
+              />
+            )}
             {/* Free Preview Video Player */}
             {activePreviewLecture ? (
               <div>

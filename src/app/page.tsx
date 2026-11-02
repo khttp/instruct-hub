@@ -540,6 +540,12 @@ export default function PlatformLandingPage() {
                     {getTenantUrl(ownedTenantSlug)}
                     <ExternalLink className="h-4 w-4" />
                   </Link>
+                  <Link
+                    href="/app/site"
+                    className="ms-5 mt-3 inline-flex items-center text-sm font-semibold text-emerald-400 hover:text-emerald-300"
+                  >
+                    {isRtl ? 'تعديل الموقع' : 'Edit website'}
+                  </Link>
                 </div>
               )}
 

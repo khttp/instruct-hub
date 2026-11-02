@@ -133,7 +133,9 @@ learnhub/
 │   └── migrations/
 │       ├── 20261102000100_init_edtech_schema.sql
 │       ├── 20261102000200_add_tenant_owners.sql
-│       └── 20261102000300_enforce_one_tenant_per_owner.sql
+│       ├── 20261102000300_enforce_one_tenant_per_owner.sql
+│       ├── 20261103000100_owner_manage_courses.sql
+│       └── 20261103000200_owner_manage_lectures.sql
 └── src/
     ├── proxy.ts                        # Subdomain routing proxy (Next.js 16 convention)
     ├── types/
@@ -183,7 +185,7 @@ npm install
    npx supabase migration repair --status applied --remote="$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" 20261102000100 20261102000200
    ```
 
-   Set `SUPABASE_PROJECT_ID` to the project reference and `SUPABASE_DB_PASSWORD` to the database password in your shell first. Do not mark `20261102000300` as applied; the workflow deploys it.
+   Set `SUPABASE_PROJECT_ID` to the project reference and `SUPABASE_DB_PASSWORD` to the database password in your shell first. The first three migrations are already recorded as applied on the production project.
 3. Configure Supabase Auth email sign-up and add your local and Vercel URLs to its allowed redirect URLs.
 
 ### Deploying database migrations
@@ -195,6 +197,8 @@ The GitHub Actions workflow at [`.github/workflows/supabase-migrations.yml`](.gi
 * `SUPABASE_PROJECT_ID`: the project reference shown in Supabase project settings.
 
 The workflow only runs `supabase db push`; it does not run the destructive tenant reset script. Ensure the one-time baseline above is complete before the first workflow run. The one-site-per-instructor migration will safely fail if an instructor already owns multiple tenants; review and resolve that data before retrying.
+
+Instructors can create, edit, publish, and delete courses in `/app`; new courses start as drafts. Published courses are listed on the public storefront. Instructors add lessons by first uploading videos to Cloudflare Stream, then entering the video ID and lesson details in the dashboard. Apply migrations `20261103000100` and `20261103000200` to enable instructor course and lesson management in production.
 
 Instructor onboarding requires a confirmed, signed-in Supabase Auth user. Each authenticated instructor can create at most one Basic tenant; the slug, owner, and theme are saved in Supabase and are publicly readable at `NEXT_PUBLIC_APP_URL/tenants/<slug>`. Returning instructors are shown a direct link to their existing site. Pro and Academy tenant activation remains unavailable until payment verification is integrated. Never put the Supabase service-role key in `NEXT_PUBLIC_*` variables or browser code.
 

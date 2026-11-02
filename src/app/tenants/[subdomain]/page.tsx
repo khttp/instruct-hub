@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { initialTenants, initialCourses } from '@/lib/data-store';
-import { Tenant } from '@/types/database';
+import { Course, Tenant } from '@/types/database';
 import { Video, ArrowRight, ShieldCheck, CheckCircle2, User, LogOut, Phone } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
@@ -18,8 +18,11 @@ export default function TenantPage() {
   const subdomain = (params?.subdomain as string) || 'physics-pro';
   const knownTenant = initialTenants[subdomain] ?? null;
   const [tenant, setTenant] = useState<Tenant | null>(knownTenant);
+  const [courses, setCourses] = useState<Course[]>(
+    knownTenant ? initialCourses.filter((course) => course.tenant_id === knownTenant.id) : []
+  );
   const [tenantStatus, setTenantStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>(
-    knownTenant ? 'ready' : 'loading'
+    'loading'
   );
 
   const [locale, setLocale] = useState<Locale>('ar'); // Default Egyptian Arabic
@@ -27,9 +30,15 @@ export default function TenantPage() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   useEffect(() => {
-    if (knownTenant) return;
-
     let active = true;
+    const showDemoTenant = () => {
+      if (!active || !knownTenant) return false;
+      setTenant(knownTenant);
+      setCourses(initialCourses.filter((course) => course.tenant_id === knownTenant.id));
+      setTenantStatus('ready');
+      return true;
+    };
+
     void (async () => {
       try {
         const { data, error } = await supabase
@@ -40,19 +49,34 @@ export default function TenantPage() {
         if (!active) return;
         if (error) {
           console.error('Could not load academy storefront:', error.message);
-          setTenantStatus('error');
+          if (!showDemoTenant()) setTenantStatus('error');
           return;
         }
         if (!data) {
-          setTenantStatus('not-found');
+          if (!showDemoTenant()) setTenantStatus('not-found');
           return;
         }
+
+        const { data: courseData, error: coursesError } = await supabase
+          .from('courses')
+          .select('*')
+          .eq('tenant_id', data.id)
+          .eq('is_published', true)
+          .order('created_at', { ascending: false });
+        if (!active) return;
+        if (coursesError) {
+          console.error('Could not load academy courses:', coursesError.message);
+          if (!showDemoTenant()) setTenantStatus('error');
+          return;
+        }
+
         setTenant(data as Tenant);
+        setCourses((courseData ?? []) as Course[]);
         setTenantStatus('ready');
       } catch (error) {
         if (!active) return;
         console.error('Could not load academy storefront:', error);
-        setTenantStatus('error');
+        if (!showDemoTenant()) setTenantStatus('error');
       }
     })();
 
@@ -84,7 +108,6 @@ export default function TenantPage() {
     </main>;
   }
 
-  const courses = initialCourses.filter((c) => c.tenant_id === tenant.id);
   const theme = tenant.theme_settings;
 
   return (
@@ -246,6 +269,11 @@ export default function TenantPage() {
             </div>
           ))}
         </div>
+        {courses.length === 0 && (
+          <p className="rounded-2xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-400">
+            {isRtl ? 'لا توجد كورسات منشورة حالياً.' : 'There are no published courses yet.'}
+          </p>
+        )}
       </section>
 
       {/* Student Auth Modal */}
