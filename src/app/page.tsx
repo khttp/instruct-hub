@@ -134,6 +134,18 @@ export default function PlatformLandingPage() {
       const result = authMode === 'sign_up'
         ? await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword })
         : await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+      const emailAlreadyRegistered = authMode === 'sign_up' && (
+        result.data.user?.identities?.length === 0
+        || (result.error?.message.toLowerCase().includes('already registered') ?? false)
+        || (result.error?.message.toLowerCase().includes('already exists') ?? false)
+      );
+      if (emailAlreadyRegistered) {
+        setAuthMode('sign_in');
+        setAuthError(isRtl
+          ? 'هذا البريد الإلكتروني مسجل بالفعل. سجّل الدخول بدلًا من إنشاء حساب جديد.'
+          : 'This email is already registered. Sign in instead.');
+        return;
+      }
       if (result.error) throw result.error;
       if (!result.data.session) {
         setAuthNotice(isRtl
