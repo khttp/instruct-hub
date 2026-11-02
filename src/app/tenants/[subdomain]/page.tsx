@@ -1,24 +1,65 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { initialTenants, initialCourses } from '@/lib/data-store';
+import { Tenant } from '@/types/database';
 import { Video, ArrowRight, ShieldCheck, CheckCircle2, User, LogOut, Phone } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
 import { setActiveStudentSession, useStudentSession } from '@/lib/student-auth';
 import { getTenantUrl } from '@/lib/tenant-url';
+import { supabase } from '@/lib/supabase/client';
 
 export default function TenantPage() {
   const params = useParams();
   const subdomain = (params?.subdomain as string) || 'physics-pro';
-  const tenant = initialTenants[subdomain] || initialTenants['physics-pro'];
+  const knownTenant = initialTenants[subdomain] ?? null;
+  const [tenant, setTenant] = useState<Tenant | null>(knownTenant);
+  const [tenantStatus, setTenantStatus] = useState<'loading' | 'ready' | 'not-found' | 'error'>(
+    knownTenant ? 'ready' : 'loading'
+  );
 
   const [locale, setLocale] = useState<Locale>('ar'); // Default Egyptian Arabic
   const student = useStudentSession();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+
+  useEffect(() => {
+    if (knownTenant) return;
+
+    let active = true;
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('subdomain', subdomain)
+          .maybeSingle();
+        if (!active) return;
+        if (error) {
+          console.error('Could not load academy storefront:', error.message);
+          setTenantStatus('error');
+          return;
+        }
+        if (!data) {
+          setTenantStatus('not-found');
+          return;
+        }
+        setTenant(data as Tenant);
+        setTenantStatus('ready');
+      } catch (error) {
+        if (!active) return;
+        console.error('Could not load academy storefront:', error);
+        setTenantStatus('error');
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [knownTenant, subdomain]);
 
   const handleLogout = () => {
     setActiveStudentSession(null);
@@ -26,6 +67,22 @@ export default function TenantPage() {
 
   const t = translations[locale].storefront;
   const isRtl = locale === 'ar';
+
+  if (tenantStatus === 'loading') {
+    return <main className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center">
+      {isRtl ? 'جارٍ تحميل الموقع...' : 'Loading academy...'}
+    </main>;
+  }
+
+  if (tenantStatus !== 'ready' || !tenant) {
+    const message = tenantStatus === 'not-found'
+      ? (isRtl ? 'لم يتم العثور على هذا الموقع التعليمي.' : 'This academy page was not found.')
+      : (isRtl ? 'تعذّر تحميل الموقع. حاول مرة أخرى لاحقاً.' : 'Could not load this academy. Please try again later.');
+    return <main className="min-h-screen bg-slate-950 text-slate-200 flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <p>{message}</p>
+      <Link href="/" className="text-sky-400 hover:text-sky-300">{isRtl ? 'العودة للرئيسية' : 'Back to LearnHub'}</Link>
+    </main>;
+  }
 
   const courses = initialCourses.filter((c) => c.tenant_id === tenant.id);
   const theme = tenant.theme_settings;

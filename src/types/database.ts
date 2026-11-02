@@ -23,6 +23,7 @@ export interface TenantThemeSettings {
 
 export interface Tenant {
   id: string;
+  owner_id?: string | null;
   organization_id?: string | null;
   subdomain: string;
   custom_domain?: string | null;

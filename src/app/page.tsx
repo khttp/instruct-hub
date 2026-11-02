@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Sparkles,
@@ -22,6 +22,8 @@ import { SubscriptionTier, QUOTA_TIER_LIMITS } from '@/types/database';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { getTenantUrl, getTenantUrlPrefix } from '@/lib/tenant-url';
+import { supabase } from '@/lib/supabase/client';
+import type { User } from '@supabase/supabase-js';
 
 export default function PlatformLandingPage() {
   const [locale, setLocale] = useState<Locale>('ar'); // Default to Arabic for Egyptian market
@@ -31,34 +33,136 @@ export default function PlatformLandingPage() {
 
   // Onboarding & Payment activation state
   const [isOnboardingActive, setIsOnboardingActive] = useState(false);
-  const [isPaymentStep, setIsPaymentStep] = useState(false);
   const [isActivated, setIsActivated] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [instructor, setInstructor] = useState<User | null>(null);
+  const [authMode, setAuthMode] = useState<'sign_in' | 'sign_up'>('sign_up');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authNotice, setAuthNotice] = useState('');
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isCreatingTenant, setIsCreatingTenant] = useState(false);
+  const [tenantError, setTenantError] = useState('');
 
   const t = translations[locale];
   const isRtl = locale === 'ar';
   const cleanSubdomain = subdomainInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const isValidSubdomain = /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(cleanSubdomain);
   const publicUrl = getTenantUrl(cleanSubdomain);
 
-  const handleFastOnboarding = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cleanSubdomain) return;
-    setIsOnboardingActive(true);
+  useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) {
+        if (active) setAuthError(error.message);
+        return;
+      }
+      if (active) setInstructor(data.session?.user ?? null);
+    }).catch((error: unknown) => {
+      if (active) {
+        setAuthError(error instanceof Error ? error.message : 'Could not load the instructor session.');
+      }
+    });
 
-    if (selectedTier === 'basic') {
-      // Basic plan activates instantly ($0 setup)
-      setIsPaymentStep(false);
-      setIsActivated(true);
-    } else {
-      // Paid plan requires payment confirmation
-      setIsPaymentStep(true);
-      setIsActivated(false);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setInstructor(session?.user ?? null);
+      setAuthError('');
+      setAuthNotice('');
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleInstructorAuth = async () => {
+    setAuthError('');
+    setAuthNotice('');
+    if (!authEmail.trim() || authPassword.length < 8) {
+      setAuthError(isRtl
+        ? 'أدخل بريداً إلكترونياً وكلمة مرور من 8 أحرف على الأقل.'
+        : 'Enter an email and a password with at least 8 characters.');
+      return;
+    }
+    setIsAuthenticating(true);
+    try {
+      const result = authMode === 'sign_up'
+        ? await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword })
+        : await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+      if (result.error) throw result.error;
+      if (!result.data.session) {
+        setAuthNotice(isRtl
+          ? 'تم إنشاء الحساب. أكّد بريدك الإلكتروني ثم سجّل الدخول للمتابعة.'
+          : 'Account created. Confirm your email, then sign in to continue.');
+        setAuthMode('sign_in');
+        return;
+      }
+      setInstructor(result.data.session.user);
+      setAuthNotice(isRtl ? 'تم تسجيل الدخول. يمكنك الآن إنشاء موقعك.' : 'Signed in. You can now create your academy site.');
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : (isRtl ? 'تعذّر تسجيل الدخول.' : 'Authentication failed.'));
+    } finally {
+      setIsAuthenticating(false);
     }
   };
 
-  const handleCompletePlanPayment = () => {
-    setIsPaymentStep(false);
-    setIsActivated(true);
+  const createTenant = async () => {
+    if (!instructor || !cleanSubdomain) return false;
+    setIsCreatingTenant(true);
+    setTenantError('');
+    try {
+      const { error } = await supabase.from('tenants').insert({
+        owner_id: instructor.id,
+        subdomain: cleanSubdomain,
+        tier: 'basic',
+        theme_settings: {
+          template: 'modern',
+          primary_color: accentColor,
+          accent_color: accentColor,
+          school_name: cleanSubdomain.replace(/-/g, ' '),
+          banner_headline: cleanSubdomain.replace(/-/g, ' '),
+          bio: '',
+        },
+      });
+      if (error) {
+        if (error.code === '23505') {
+          throw new Error(isRtl ? 'هذا الرابط محجوز بالفعل. اختر اسماً آخر.' : 'That URL is already taken. Choose another name.');
+        }
+        throw error;
+      }
+      setIsOnboardingActive(true);
+      setIsActivated(true);
+      return true;
+    } catch (error) {
+      setTenantError(error instanceof Error ? error.message : (isRtl ? 'تعذّر إنشاء الموقع.' : 'Could not create the academy site.'));
+      return false;
+    } finally {
+      setIsCreatingTenant(false);
+    }
+  };
+
+  const handleFastOnboarding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isValidSubdomain) {
+      setTenantError(isRtl
+        ? 'استخدم من 1 إلى 100 حرفاً من الحروف الإنجليزية الصغيرة والأرقام والشرطة، دون شرطة في البداية أو النهاية.'
+        : 'Use 1–100 lowercase letters, numbers, and hyphens; the slug cannot start or end with a hyphen.');
+      return;
+    }
+    setTenantError('');
+    if (!instructor) {
+      setTenantError(isRtl ? 'سجّل الدخول أو أنشئ حساباً للمتابعة.' : 'Sign in or create an account to continue.');
+      return;
+    }
+    if (selectedTier === 'basic') {
+      await createTenant();
+    } else {
+      setTenantError(isRtl
+        ? 'إنشاء الباقات المدفوعة غير متاح قبل تفعيل معالجة الدفع. اختر الباقة المجانية للمتابعة.'
+        : 'Paid plan activation is not available until payment processing is configured. Choose Basic to continue.');
+    }
   };
 
   const handleCopyLink = () => {
@@ -259,16 +363,105 @@ export default function PlatformLandingPage() {
                 </div>
               </div>
 
+              {!instructor ? (
+                <div
+                  className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-3"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void handleInstructorAuth();
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-slate-300">
+                      {isRtl ? 'حساب المدرّس مطلوب لحفظ موقعك' : 'Instructor account required to save your site'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthMode(authMode === 'sign_up' ? 'sign_in' : 'sign_up');
+                        setAuthError('');
+                        setAuthNotice('');
+                      }}
+                      className="text-xs text-sky-400 hover:text-sky-300"
+                    >
+                      {authMode === 'sign_up'
+                        ? (isRtl ? 'لديك حساب؟ دخول' : 'Have an account? Sign in')
+                        : (isRtl ? 'حساب جديد' : 'Create account')}
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    <input
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={authEmail}
+                      onChange={(event) => setAuthEmail(event.target.value)}
+                      placeholder={isRtl ? 'البريد الإلكتروني' : 'Email address'}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white placeholder-slate-500"
+                    />
+                    <input
+                      type="password"
+                      required
+                      minLength={8}
+                      autoComplete={authMode === 'sign_up' ? 'new-password' : 'current-password'}
+                      value={authPassword}
+                      onChange={(event) => setAuthPassword(event.target.value)}
+                      placeholder={isRtl ? 'كلمة المرور (8 أحرف على الأقل)' : 'Password (at least 8 characters)'}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white placeholder-slate-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleInstructorAuth()}
+                      disabled={isAuthenticating}
+                      className="w-full rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50 py-2.5 text-xs font-bold text-white"
+                    >
+                      {isAuthenticating
+                        ? (isRtl ? 'جارٍ التحقق...' : 'Please wait...')
+                        : authMode === 'sign_up'
+                          ? (isRtl ? 'إنشاء حساب مدرس' : 'Create instructor account')
+                          : (isRtl ? 'تسجيل الدخول' : 'Sign in')}
+                    </button>
+                  </div>
+                  {authError && <p role="alert" className="text-xs text-rose-400">{authError}</p>}
+                  {authNotice && <p role="status" className="text-xs text-emerald-400">{authNotice}</p>}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs">
+                  <span className="text-emerald-300">{instructor.email}</span>
+                  <button
+                    type="button"
+                    onClick={() => { void supabase.auth.signOut(); setInstructor(null); }}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    {isRtl ? 'تسجيل الخروج' : 'Sign out'}
+                  </button>
+                </div>
+              )}
+
+              {tenantError && <p role="alert" className="text-xs text-rose-400">{tenantError}</p>}
+              {selectedTier !== 'basic' && (
+                <p className="text-xs text-amber-300">
+                  {isRtl
+                    ? 'يجب اختيار الباقة المجانية حالياً؛ تفعيل الخطط المدفوعة يحتاج ربط بوابة الدفع.'
+                    : 'Only Basic can be activated now. Paid plans require a verified payment integration.'}
+                </p>
+              )}
+
               <button
                 type="submit"
-                disabled={!cleanSubdomain}
+                disabled={!isValidSubdomain || !instructor || isCreatingTenant || selectedTier !== 'basic'}
                 className={`w-full py-4 rounded-xl font-bold text-sm text-white transition-all shadow-xl flex items-center justify-center gap-2 ${
-                  cleanSubdomain
+                  isValidSubdomain && instructor && !isCreatingTenant && selectedTier === 'basic'
                     ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/30'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 }`}
               >
-                {t.onboarding.cta} <ArrowRight className={`w-4 h-4 ${isRtl ? 'rotate-180' : ''}`} />
+                {isCreatingTenant
+                  ? (isRtl ? 'جارٍ إنشاء موقعك...' : 'Creating your site...')
+                  : t.onboarding.cta}
+                <ArrowRight className={`w-4 h-4 ${isRtl ? 'rotate-180' : ''}`} />
               </button>
             </form>
           </div>
@@ -392,54 +585,10 @@ export default function PlatformLandingPage() {
         </div>
       </section>
 
-      {/* Onboarding & Payment Activation Flow Modal */}
+      {/* Storefront creation confirmation */}
       {isOnboardingActive && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-lg w-full text-center shadow-2xl relative">
-            {/* Step A: Paid Plan Subscription Payment (Pro / Academy) */}
-            {isPaymentStep && (
-              <div>
-                <div className="w-16 h-16 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center mx-auto mb-4 border border-purple-500/40">
-                  <CreditCard className="w-8 h-8" />
-                </div>
-                <h3 className="text-2xl font-bold text-white mb-2">
-                  {isRtl ? 'تأكيد اشتراك الباقة' : 'Confirm Plan Subscription'}
-                </h3>
-                <p className="text-slate-300 text-xs mb-6">
-                  {isRtl
-                    ? `قيمة اشتراك باقة ${selectedTier === 'pro' ? 'برو (Pro)' : 'الأكاديمية'}: ${QUOTA_TIER_LIMITS[selectedTier].monthlyFeeEGP} جنيه مصري شهرياً.`
-                    : `Plan fee for ${selectedTier.toUpperCase()}: ${QUOTA_TIER_LIMITS[selectedTier].monthlyFeeEGP} EGP/month.`}
-                </p>
-
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 text-xs text-slate-300 text-start space-y-2 mb-6">
-                  <div className="flex justify-between pb-2 border-b border-slate-800">
-                    <span className="text-slate-400">{isRtl ? 'تحويل فودافون كاش للمنصة:' : 'Platform Vodafone Cash:'}</span>
-                    <strong className="font-mono text-white">01012345678</strong>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">{isRtl ? 'عنوان إنستاباي للمنصة:' : 'Platform InstaPay:'}</span>
-                    <strong className="font-mono text-white">learnhub.eg@instapay</strong>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <button
-                    onClick={handleCompletePlanPayment}
-                    className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-emerald-600/30 transition-all"
-                  >
-                    {isRtl ? 'تأكيد السداد وتفعيل موقعي الآن ✓' : 'Confirm Payment & Make Website Public Now ✓'}
-                  </button>
-                  <button
-                    onClick={() => setIsOnboardingActive(false)}
-                    className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-400"
-                  >
-                    {isRtl ? 'إلغاء' : 'Cancel'}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step B: Website Activated & Public Anywhere + WhatsApp Share Ready! */}
             {isActivated && (
               <div>
                 <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mx-auto mb-4 border border-emerald-500/40">

@@ -172,6 +172,13 @@ cd ~/Documents/learnhub
 npm install
 ```
 
+### Configure instructor accounts and storefront persistence
+1. Create a Supabase project and set `NEXT_SUPABASE_URL` and `NEXT_SUPABASE_PUBLISHABLE_KEY` from its API settings in `.env.local` and in Vercel's project environment variables. The Next.js config maps these to the browser-visible Supabase client variables at build time; publishable keys are intended for client use.
+2. Apply `supabase/migrations/20261102_init_edtech_schema.sql`, then `supabase/migrations/20261102_add_tenant_owners.sql` using the Supabase SQL Editor (or the Supabase CLI).
+3. Configure Supabase Auth email sign-up and add your local and Vercel URLs to its allowed redirect URLs.
+
+Instructor onboarding requires a confirmed, signed-in Supabase Auth user. Each authenticated instructor can create a Basic tenant; the slug, owner, and theme are saved in Supabase and are publicly readable at `NEXT_PUBLIC_APP_URL/tenants/<slug>`. Pro and Academy tenant activation remains unavailable until payment verification is integrated. Never put the Supabase service-role key in `NEXT_PUBLIC_*` variables or browser code.
+
 ### 2. Start the Development Server
 ```bash
 npm run dev
