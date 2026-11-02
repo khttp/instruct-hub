@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { Share2, Copy, Check, MessageCircle, QrCode, X, ExternalLink, Sparkles } from 'lucide-react';
 import { Locale } from '@/lib/i18n';
+import { getTenantUrl } from '@/lib/tenant-url';
 
 interface ShareWebsiteModalProps {
   isOpen: boolean;
@@ -25,7 +26,7 @@ export function ShareWebsiteModal({
 
   if (!isOpen) return null;
 
-  const publicUrl = `https://${subdomain}.learnhub.me`;
+  const publicUrl = getTenantUrl(subdomain);
   const shareMessage = isRtl
     ? `أهلاً بكم يا شباب! ده موقعي التعليمي الرسمي (${academyName}) لمتابعة شروحات الكورسات ومحاضرات المراجعة وحل المسائل أونلاين:\n${publicUrl}`
     : `Hello students! Here is my official academy website (${academyName}) to watch lecture videos and practice exercises:\n${publicUrl}`;

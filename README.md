@@ -9,7 +9,7 @@
 In Egypt and the MENA region, private tutors and academies spend thousands of dollars to create custom educational apps, or rely on platforms that take hefty cuts and require international credit cards that Egyptian students don't have.
 
 **LearnHub** solves this with a **$0 Initial Overhead Strategy**:
-1. **White-Label Storefronts in 60 Seconds**: Any teacher or academy registers and instantly receives their own branded website (e.g., `physics-pro.learnhub.me` or their own domain `math.egypt-edu.com`).
+1. **White-Label Storefronts in 60 Seconds**: Any teacher or academy gets a shareable storefront path (e.g., `instruct-hub.vercel.app/tenants/physics-pro`), with custom domains planned for production setup.
 2. **Instant Website Activation & Easy Sharing**: Once setup & plan payment are confirmed, the website is live and public worldwide. Instructors can share their link directly to student WhatsApp groups or generate a printable QR Code for center booklets.
 3. **Student Login with Phone Number + PIN (تسجيل الدخول برقم الموبايل والرقم السري)**: No email required. Egyptian high school and prep students simply enter their 11-digit mobile number and a 4-digit PIN to access their courses.
 4. **100% Localized Egyptian Payments**: Egyptian students don't need credit cards. They pay via **InstaPay** or **Vodafone Cash**, upload a screenshot of their transaction, and the instructor unlocks the course with a single click.
@@ -181,6 +181,7 @@ npm run dev
 * **Main Landing & Academy Creator:** [http://localhost:3000](http://localhost:3000)
   * Click the **"العربية" / "English"** button in the header to switch languages instantly.
   * Test creating a new subdomain in 60 seconds.
+  * Student share links use `NEXT_PUBLIC_APP_URL` (defaults to `https://instruct-hub.vercel.app`) followed by `/tenants/<slug>`.
 * **Instructor Portal:** [http://localhost:3000/app](http://localhost:3000/app)
   * Review pending receipts, click **Approve** or **Reject**, view live quota bars, and test adding lectures.
 * **End-to-end payment demo:** On the course page, sign in with demo student `01011223344` / PIN `1234`, upload an image receipt (2 MB maximum), and submit. The request appears in the instructor portal in the same browser profile. Approve it, then reload the classroom to unlock paid lectures. The demo student `01122334455` / PIN `5678` is already approved.

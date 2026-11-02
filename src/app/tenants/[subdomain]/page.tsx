@@ -9,6 +9,7 @@ import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
 import { setActiveStudentSession, useStudentSession } from '@/lib/student-auth';
+import { getTenantUrl } from '@/lib/tenant-url';
 
 export default function TenantPage() {
   const params = useParams();
@@ -51,7 +52,7 @@ export default function TenantPage() {
                 {theme.school_name}
               </span>
               <span dir="ltr" className="text-xs text-slate-400 font-mono block text-left">
-                {tenant.subdomain}.learnhub.me
+                {getTenantUrl(subdomain).replace(/^https?:\/\//, '')}
               </span>
             </div>
           </div>

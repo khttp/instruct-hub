@@ -24,6 +24,7 @@ import {
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { ShareWebsiteModal } from '@/components/ShareWebsiteModal';
+import { getTenantUrl } from '@/lib/tenant-url';
 
 export default function InstructorDashboard() {
   const [locale, setLocale] = useState<Locale>('ar'); // Default Egyptian Arabic
@@ -75,7 +76,7 @@ export default function InstructorDashboard() {
 
   const t = translations[locale].dashboard;
   const isRtl = locale === 'ar';
-  const publicUrl = `https://${tenant.subdomain}.learnhub.me`;
+  const publicUrl = getTenantUrl(tenant.subdomain);
 
   // Calculate live quotas
   const quotaInfo = checkTenantQuota(tenant);

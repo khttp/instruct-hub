@@ -21,6 +21,7 @@ import {
 import { SubscriptionTier, QUOTA_TIER_LIMITS } from '@/types/database';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
+import { getTenantUrl, getTenantUrlPrefix } from '@/lib/tenant-url';
 
 export default function PlatformLandingPage() {
   const [locale, setLocale] = useState<Locale>('ar'); // Default to Arabic for Egyptian market
@@ -37,7 +38,7 @@ export default function PlatformLandingPage() {
   const t = translations[locale];
   const isRtl = locale === 'ar';
   const cleanSubdomain = subdomainInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
-  const publicUrl = `https://${cleanSubdomain}.learnhub.me`;
+  const publicUrl = getTenantUrl(cleanSubdomain);
 
   const handleFastOnboarding = (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,6 +177,9 @@ export default function PlatformLandingPage() {
                   {t.onboarding.subdomainLabel}
                 </label>
                 <div dir="ltr" className="flex items-center bg-slate-950 border border-slate-700 rounded-xl overflow-hidden focus-within:border-sky-500 transition-colors">
+                  <div className="px-3 py-3.5 bg-slate-800/80 text-xs font-mono text-slate-400 border-r border-slate-700 whitespace-nowrap">
+                    {getTenantUrlPrefix()}
+                  </div>
                   <input
                     type="text"
                     required
@@ -184,13 +188,10 @@ export default function PlatformLandingPage() {
                     onChange={(e) => setSubdomainInput(e.target.value)}
                     className="flex-1 bg-transparent px-4 py-3.5 text-sm text-white placeholder-slate-600 focus:outline-none"
                   />
-                  <div className="px-4 py-3.5 bg-slate-800/80 text-xs font-mono text-slate-400 border-l border-slate-700">
-                    .learnhub.me
-                  </div>
                 </div>
                 {cleanSubdomain && (
                   <p dir="ltr" className="text-[11px] text-emerald-400 mt-2 flex items-center gap-1 font-mono">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> URL: https://{cleanSubdomain}.learnhub.me
+                    <CheckCircle2 className="w-3.5 h-3.5" /> URL: {publicUrl}
                   </p>
                 )}
               </div>
@@ -491,7 +492,7 @@ export default function PlatformLandingPage() {
                   </Link>
 
                   <Link
-                    href={`/tenants/physics-pro`}
+                    href={`/tenants/${encodeURIComponent(cleanSubdomain)}`}
                     className="w-full py-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-white font-semibold rounded-xl text-xs transition-colors"
                   >
                     {isRtl ? 'معاينة تجريبية كطالب' : 'Preview Student Experience'}

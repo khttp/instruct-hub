@@ -11,6 +11,7 @@ import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { setActiveStudentSession, useStudentSession } from '@/lib/student-auth';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
+import { getTenantUrl } from '@/lib/tenant-url';
 
 export default function CourseDetailsPage() {
   const params = useParams();
@@ -80,7 +81,7 @@ export default function CourseDetailsPage() {
 
             <LanguageToggle locale={locale} onToggle={setLocale} />
             <div dir="ltr" className="text-xs font-mono text-slate-400 hidden sm:block">
-              {tenant.subdomain}.learnhub.me
+              {getTenantUrl(subdomain).replace(/^https?:\/\//, '')}
             </div>
           </div>
         </div>
