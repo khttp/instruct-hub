@@ -6,8 +6,8 @@ const supabasePublishableKey =
 
 const nextConfig: NextConfig = {
   env: {
-    ...(supabaseUrl ? { NEXT_PUBLIC_SUPABASE_URL: supabaseUrl } : {}),
-    ...(supabasePublishableKey ? { NEXT_PUBLIC_SUPABASE_ANON_KEY: supabasePublishableKey } : {}),
+    ...(supabaseUrl ? { NEXT_SUPABASE_URL: supabaseUrl } : {}),
+    ...(supabasePublishableKey ? { NEXT_SUPABASE_PUBLISHABLE_KEY: supabasePublishableKey } : {}),
   },
   images: {
     remotePatterns: [
