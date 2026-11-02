@@ -105,7 +105,7 @@ flowchart TD
 
 ## 🗄️ 5. Database Schema & Security (PostgreSQL / Supabase)
 
-Migration file: [`supabase/migrations/20261102_init_edtech_schema.sql`](supabase/migrations/20261102_init_edtech_schema.sql)
+Migrations are in [`supabase/migrations/`](supabase/migrations/). The numbered SQL files are applied in order.
 
 * **`organizations`**: Multi-teacher academies and school institutes.
 * **`tenants`**: Subdomain mapping (`subdomain.learnhub.me`), custom domain, theme settings JSONB, and live storage counters.
@@ -131,7 +131,9 @@ learnhub/
 ├── next.config.ts                      # Next.js 16 configuration
 ├── supabase/
 │   └── migrations/
-│       └── 20261102_init_edtech_schema.sql # PostgreSQL multi-tenant schema & RLS rules
+│       ├── 20261102000100_init_edtech_schema.sql
+│       ├── 20261102000200_add_tenant_owners.sql
+│       └── 20261102000300_enforce_one_tenant_per_owner.sql
 └── src/
     ├── proxy.ts                        # Subdomain routing proxy (Next.js 16 convention)
     ├── types/
@@ -174,10 +176,29 @@ npm install
 
 ### Configure instructor accounts and storefront persistence
 1. Create a Supabase project and set `NEXT_SUPABASE_URL` and `NEXT_SUPABASE_PUBLISHABLE_KEY` from its API settings in `.env.local` and in Vercel's project environment variables. The Next.js config maps these to the browser-visible Supabase client variables at build time; publishable keys are intended for client use.
-2. Apply `supabase/migrations/20261102_init_edtech_schema.sql`, then `supabase/migrations/20261102_add_tenant_owners.sql` using the Supabase SQL Editor (or the Supabase CLI).
+2. The schema and ownership migrations (`20261102000100` and `20261102000200`) were already applied manually to the production Supabase project. Before using the automated workflow, baseline those existing migrations in the Supabase migration history once:
+
+   ```bash
+   npx supabase login
+   npx supabase migration repair --status applied --remote="$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" 20261102000100 20261102000200
+   ```
+
+   Set `SUPABASE_PROJECT_ID` to the project reference and `SUPABASE_DB_PASSWORD` to the database password in your shell first. Do not mark `20261102000300` as applied; the workflow deploys it.
 3. Configure Supabase Auth email sign-up and add your local and Vercel URLs to its allowed redirect URLs.
 
-Instructor onboarding requires a confirmed, signed-in Supabase Auth user. Each authenticated instructor can create a Basic tenant; the slug, owner, and theme are saved in Supabase and are publicly readable at `NEXT_PUBLIC_APP_URL/tenants/<slug>`. Pro and Academy tenant activation remains unavailable until payment verification is integrated. Never put the Supabase service-role key in `NEXT_PUBLIC_*` variables or browser code.
+### Deploying database migrations
+
+The GitHub Actions workflow at [`.github/workflows/supabase-migrations.yml`](.github/workflows/supabase-migrations.yml) runs on pushes to `master` when migration files change, and can also be started manually with **Actions → Supabase migrations → Run workflow**. Add these repository Actions secrets before enabling it:
+
+* `SUPABASE_ACCESS_TOKEN`: a Supabase personal access token.
+* `SUPABASE_DB_PASSWORD`: the production project's database password.
+* `SUPABASE_PROJECT_ID`: the project reference shown in Supabase project settings.
+
+The workflow only runs `supabase db push`; it does not run the destructive tenant reset script. Ensure the one-time baseline above is complete before the first workflow run. The one-site-per-instructor migration will safely fail if an instructor already owns multiple tenants; review and resolve that data before retrying.
+
+Instructor onboarding requires a confirmed, signed-in Supabase Auth user. Each authenticated instructor can create at most one Basic tenant; the slug, owner, and theme are saved in Supabase and are publicly readable at `NEXT_PUBLIC_APP_URL/tenants/<slug>`. Returning instructors are shown a direct link to their existing site. Pro and Academy tenant activation remains unavailable until payment verification is integrated. Never put the Supabase service-role key in `NEXT_PUBLIC_*` variables or browser code.
+
+If existing tenant records must be cleared before enforcing one site per instructor, first review and manually run `supabase/scripts/reset_tenants_before_owner_limit.sql` in the Supabase SQL Editor. This deletes all tenants and cascades to associated profiles, courses, lectures, and enrollments; it does not delete Supabase Auth users. The reset script is never run by deployment automation.
 
 ### 2. Start the Development Server
 ```bash

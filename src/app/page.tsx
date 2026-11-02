@@ -36,6 +36,8 @@ export default function PlatformLandingPage() {
   const [isActivated, setIsActivated] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [instructor, setInstructor] = useState<User | null>(null);
+  const [ownedTenantSlug, setOwnedTenantSlug] = useState<string | null | undefined>(undefined);
+  const [ownedTenantError, setOwnedTenantError] = useState('');
   const [authMode, setAuthMode] = useState<'sign_in' | 'sign_up'>('sign_up');
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -50,6 +52,47 @@ export default function PlatformLandingPage() {
   const cleanSubdomain = subdomainInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
   const isValidSubdomain = /^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(cleanSubdomain);
   const publicUrl = getTenantUrl(cleanSubdomain);
+
+  useEffect(() => {
+    let active = true;
+    if (!instructor) {
+      queueMicrotask(() => {
+        if (active) {
+          setOwnedTenantSlug(null);
+          setOwnedTenantError('');
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('tenants')
+          .select('subdomain')
+          .eq('owner_id', instructor.id)
+          .maybeSingle();
+        if (!active) return;
+        if (error) {
+          setOwnedTenantError(error.message);
+          setOwnedTenantSlug(null);
+          return;
+        }
+        setOwnedTenantError('');
+        setOwnedTenantSlug(data?.subdomain ?? null);
+      } catch (error) {
+        if (!active) return;
+        setOwnedTenantError(error instanceof Error ? error.message : 'Could not load your existing site.');
+        setOwnedTenantSlug(null);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [instructor]);
 
   useEffect(() => {
     let active = true;
@@ -110,10 +153,16 @@ export default function PlatformLandingPage() {
 
   const createTenant = async () => {
     if (!instructor || !cleanSubdomain) return false;
+    if (ownedTenantSlug) {
+      setTenantError(isRtl
+        ? 'لديك موقع بالفعل. يمكنك زيارة موقعك الحالي من الرابط أدناه.'
+        : 'You already have a site. Visit your existing site using the link below.');
+      return false;
+    }
     setIsCreatingTenant(true);
     setTenantError('');
     try {
-      const { error } = await supabase.from('tenants').insert({
+      const { data, error } = await supabase.from('tenants').insert({
         owner_id: instructor.id,
         subdomain: cleanSubdomain,
         tier: 'basic',
@@ -125,13 +174,25 @@ export default function PlatformLandingPage() {
           banner_headline: cleanSubdomain.replace(/-/g, ' '),
           bio: '',
         },
-      });
+      }).select('subdomain').single();
       if (error) {
         if (error.code === '23505') {
+          if (error.message.includes('idx_tenants_one_site_per_owner')) {
+            const { data: existing } = await supabase
+              .from('tenants')
+              .select('subdomain')
+              .eq('owner_id', instructor.id)
+              .maybeSingle();
+            if (existing) setOwnedTenantSlug(existing.subdomain);
+            throw new Error(isRtl
+              ? 'لديك موقع بالفعل. يمكنك زيارة موقعك الحالي من الرابط أدناه.'
+              : 'You already have a site. Visit your existing site using the link below.');
+          }
           throw new Error(isRtl ? 'هذا الرابط محجوز بالفعل. اختر اسماً آخر.' : 'That URL is already taken. Choose another name.');
         }
         throw error;
       }
+      setOwnedTenantSlug(data.subdomain);
       setIsOnboardingActive(true);
       setIsActivated(true);
       return true;
@@ -440,6 +501,36 @@ export default function PlatformLandingPage() {
                 </div>
               )}
 
+              {instructor && ownedTenantSlug === undefined && (
+                <p role="status" className="text-xs text-slate-400">
+                  {isRtl ? 'جارٍ التحقق من موقعك...' : 'Checking for your existing site...'}
+                </p>
+              )}
+              {instructor && ownedTenantError && (
+                <p role="alert" className="text-xs text-rose-400">
+                  {isRtl
+                    ? 'تعذّر التحقق من موقعك الحالي؛ أعد تحميل الصفحة قبل إنشاء موقع لتجنب التكرار.'
+                    : `Could not check your existing site: ${ownedTenantError}. Reload before creating a site to avoid duplicates.`}
+                </p>
+              )}
+              {instructor && ownedTenantSlug && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                  <p className="text-sm font-bold text-white">
+                    {isRtl ? 'لديك موقع تعليمي بالفعل' : 'You already have an academy website'}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {isRtl ? 'يمكنك زيارة موقعك الحالي من هنا:' : 'Visit your existing student-facing site:'}
+                  </p>
+                  <Link
+                    href={`/tenants/${encodeURIComponent(ownedTenantSlug)}`}
+                    className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-sky-400 hover:text-sky-300"
+                  >
+                    {getTenantUrl(ownedTenantSlug)}
+                    <ExternalLink className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
+
               {tenantError && <p role="alert" className="text-xs text-rose-400">{tenantError}</p>}
               {selectedTier !== 'basic' && (
                 <p className="text-xs text-amber-300">
@@ -451,7 +542,7 @@ export default function PlatformLandingPage() {
 
               <button
                 type="submit"
-                disabled={!isValidSubdomain || !instructor || isCreatingTenant || selectedTier !== 'basic'}
+                disabled={!isValidSubdomain || !instructor || isCreatingTenant || selectedTier !== 'basic' || ownedTenantSlug !== null || Boolean(ownedTenantError)}
                 className={`w-full py-4 rounded-xl font-bold text-sm text-white transition-all shadow-xl flex items-center justify-center gap-2 ${
                   isValidSubdomain && instructor && !isCreatingTenant && selectedTier === 'basic'
                     ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/30'

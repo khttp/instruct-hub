@@ -1,4 +1,4 @@
--- Authenticated instructors own the tenant records they create.
+-- Authenticated instructors own the tenant records they create (baseline).
 ALTER TABLE tenants
     ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 

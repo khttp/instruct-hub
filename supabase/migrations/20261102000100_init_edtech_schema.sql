@@ -1,4 +1,4 @@
--- LearnHub Multi-Tenant LMS & Dynamic Website Builder
+-- LearnHub Multi-Tenant LMS & Dynamic Website Builder (baseline schema)
 -- Schema generated in compliance with edtech_platform_srad.pdf
 
 -- 1. Setup Enums for Quota Matrix & Permissions
