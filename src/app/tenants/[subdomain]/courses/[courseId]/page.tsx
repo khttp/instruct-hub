@@ -6,10 +6,10 @@ import { useParams } from 'next/navigation';
 import { initialTenants, initialCourses, initialLectures } from '@/lib/data-store';
 import { CloudflareStreamPlayer } from '@/components/CloudflareStreamPlayer';
 import { ManualPaymentCheckout } from '@/components/ManualPaymentCheckout';
-import { ArrowLeft, ArrowRight, Play, Lock, CheckCircle2, ShieldCheck, Clock, User, LogOut, Phone } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Play, Lock, CheckCircle2, ShieldCheck, Clock, User, LogOut, Mail } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
-import { setActiveStudentSession, useStudentSession } from '@/lib/student-auth';
+import { signOutStudent, useStudentSession } from '@/lib/student-auth';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
 import { getTenantUrl } from '@/lib/tenant-url';
 import { supabase } from '@/lib/supabase/client';
@@ -24,8 +24,12 @@ export default function CourseDetailsPage() {
   const student = useStudentSession();
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  const handleLogout = () => {
-    setActiveStudentSession(null);
+  const handleLogout = async () => {
+    try {
+      await signOutStudent();
+    } catch (error) {
+      console.error('Could not sign out student:', error);
+    }
   };
 
   const t = translations[locale].courseDetails;
@@ -151,7 +155,7 @@ export default function CourseDetailsPage() {
                 </div>
                 <div className="hidden sm:block text-start leading-tight">
                   <div className="font-bold text-white text-xs">{student.fullName}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{student.phoneNumber}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{student.email}</div>
                 </div>
                 <button
                   onClick={handleLogout}
@@ -166,8 +170,8 @@ export default function CourseDetailsPage() {
                 onClick={() => setIsAuthModalOpen(true)}
                 className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors"
               >
-                <Phone className="w-3.5 h-3.5 text-sky-400" />
-                <span>{isRtl ? 'دخول الطالب (بالهاتف و PIN)' : 'Student Login'}</span>
+                <Mail className="w-3.5 h-3.5 text-sky-400" />
+                <span>{isRtl ? 'دخول الطالب بالبريد الإلكتروني' : 'Student Login'}</span>
               </button>
             )}
 
@@ -211,7 +215,10 @@ export default function CourseDetailsPage() {
                 </div>
                 <CloudflareStreamPlayer
                   streamId={activePreviewLecture.cloudflare_stream_id}
+                  muxPlaybackId={activePreviewLecture.mux_playback_id}
                   title={activePreviewLecture.title}
+                  courseId={course.id}
+                  lectureId={activePreviewLecture.id}
                 />
               </div>
             ) : (

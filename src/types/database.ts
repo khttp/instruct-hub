@@ -36,8 +36,9 @@ export interface Tenant {
 
 export interface Profile {
   id: string;
-  tenant_id: string;
+  tenant_id: string | null;
   full_name: string;
+  email?: string | null;
   role: UserRole;
   phone_number?: string | null;
   created_at: string;
@@ -59,7 +60,8 @@ export interface Lecture {
   course_id: string;
   title: string;
   description?: string | null;
-  cloudflare_stream_id: string;
+  cloudflare_stream_id: string | null;
+  mux_playback_id?: string | null;
   file_size_bytes: number;
   sort_order: number;
   is_free_preview: boolean;

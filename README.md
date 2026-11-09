@@ -13,7 +13,7 @@ In Egypt and the MENA region, private tutors and academies spend thousands of do
 2. **Instant Website Activation & Easy Sharing**: Once setup & plan payment are confirmed, the website is live and public worldwide. Instructors can share their link directly to student WhatsApp groups or generate a printable QR Code for center booklets.
 3. **Student Login with Phone Number + PIN (تسجيل الدخول برقم الموبايل والرقم السري)**: No email required. Egyptian high school and prep students simply enter their 11-digit mobile number and a 4-digit PIN to access their courses.
 4. **100% Localized Egyptian Payments**: Egyptian students don't need credit cards. They pay via **InstaPay** or **Vodafone Cash**, upload a screenshot of their transaction, and the instructor unlocks the course with a single click.
-5. **Adaptive Video Streaming with 360p Data Saver**: High-definition video powered by **Cloudflare Stream (HLS)** that automatically scales down to 360p (~180MB/hour) so students don't deplete their expensive mobile data packages.
+5. **Adaptive Video Streaming**: Instructors upload in LearnHub; the platform stores and streams videos through its centrally managed Mux account.
 6. **Course-Grounded AI Assistant**: An embedded AI teaching assistant grounded strictly on the instructor's lecture transcripts and notes to answer students 24/7.
 7. **Arabic First (دعم كامل للغة العربية)**: Seamless language switcher with RTL layout support tailored for Egyptian curriculum (Thanaweya Amma, Prep, and University courses).
 
@@ -42,7 +42,7 @@ flowchart TD
 
     subgraph Backend ["Data, Video & Auth Services"]
         DB[("Supabase PostgreSQL (RLS Multi-Tenancy)")]
-        CFStream["Cloudflare Stream (Adaptive HLS 360p-1080p)"]
+        CFStream["Mux Video (instructor-owned accounts)"]
         PayRails["Manual Egyptian Rails (InstaPay / Vodafone Cash)"]
     end
 
@@ -77,8 +77,8 @@ flowchart TD
   * Unique branding, logo, customized headline, and syllabus list.
 * **Curriculum & Previews:** [`src/app/tenants/[subdomain]/courses/[courseId]/page.tsx`](src/app/tenants/[subdomain]/courses/[courseId]/page.tsx)
   * Free preview lessons accessible without login; locked lessons require enrollment.
-* **Cloudflare Stream Player:** [`src/components/CloudflareStreamPlayer.tsx`](src/components/CloudflareStreamPlayer.tsx)
-  * Adaptive bitrate engine with a **360p Data Saver mode** for Egyptian 4G mobile networks.
+* **Mux Video Player:** [`src/components/CloudflareStreamPlayer.tsx`](src/components/CloudflareStreamPlayer.tsx)
+  * Plays Mux uploads and continues supporting existing Cloudflare Stream videos.
 * **Classroom & Course AI:** [`src/app/tenants/[subdomain]/learn/[courseId]/page.tsx`](src/app/tenants/[subdomain]/learn/[courseId]/page.tsx)
   * Interactive playlist, lecture completion checkmarks, and embedded course-grounded AI bot.
 
@@ -88,8 +88,8 @@ flowchart TD
   * Uploads screenshot proof of transfer (up to 2 MB) and places it in the instructor's review queue.
 * **Instructor Dashboard:** [`src/app/app/page.tsx`](src/app/app/page.tsx)
   * **Manual Verification Queue**: Review uploaded receipts and approve or reject enrollment requests. Approved students can access paid classroom lectures; free previews remain public.
-  * **Quota Guardrail Matrix**: Live tracking of Cloudflare storage and active student counts against plan limits.
-  * **Course & Lecture Creator**: Upload video lectures with Cloudflare Stream IDs and check storage quota limits before saving.
+  * **Quota Guardrail Matrix**: Live tracking of video storage and active student counts against plan limits.
+  * **Course & Lecture Creator**: Upload videos in LearnHub; they are sent directly from the browser to the platform's Mux account.
 
 ---
 
@@ -111,7 +111,7 @@ Migrations are in [`supabase/migrations/`](supabase/migrations/). The numbered S
 * **`tenants`**: Subdomain mapping (`subdomain.learnhub.me`), custom domain, theme settings JSONB, and live storage counters.
 * **`profiles`**: Tied to Supabase Auth (`student`, `teacher`, `organization_admin`).
 * **`courses`**: Course metadata, EGP pricing, and publishing status.
-* **`lectures`**: Cloudflare Stream IDs, byte size (for quota enforcement), sort order, and free preview flags.
+* **`lectures`**: Video playback IDs, byte size, sort order, and free preview flags.
 * **`enrollments`**: Student course purchases with payment status (`pending`, `approved`, `rejected`) and receipt screenshot URLs.
 * **Row-Level Security (RLS)**:
   * Public can read tenant metadata and published course info.
@@ -135,7 +135,8 @@ learnhub/
 │       ├── 20261102000200_add_tenant_owners.sql
 │       ├── 20261102000300_enforce_one_tenant_per_owner.sql
 │       ├── 20261103000100_owner_manage_courses.sql
-│       └── 20261103000200_owner_manage_lectures.sql
+│       ├── 20261103000200_owner_manage_lectures.sql
+│       └── 20261103000300_mux_video_support.sql
 └── src/
     ├── proxy.ts                        # Subdomain routing proxy (Next.js 16 convention)
     ├── types/
@@ -198,7 +199,9 @@ The GitHub Actions workflow at [`.github/workflows/supabase-migrations.yml`](.gi
 
 The workflow only runs `supabase db push`; it does not run the destructive tenant reset script. Ensure the one-time baseline above is complete before the first workflow run. The one-site-per-instructor migration will safely fail if an instructor already owns multiple tenants; review and resolve that data before retrying.
 
-Instructors can create, edit, publish, and delete courses in `/app`; new courses start as drafts. Published courses are listed on the public storefront. Instructors add lessons by first uploading videos to Cloudflare Stream, then entering the video ID and lesson details in the dashboard. Apply migrations `20261103000100` and `20261103000200` to enable instructor course and lesson management in production.
+Instructors can create, edit, publish, and delete courses in `/app`; new courses start as drafts. Students register with email/password, transfer through InstaPay or Vodafone Cash, and upload a receipt image. The receipt is stored in a private Supabase Storage bucket; instructors can review it and approve or reject the request in `/app`.
+
+Instructors select videos in the LearnHub course editor; the browser uploads them directly to LearnHub's Mux account, without requiring instructors to manage a video-provider account. Configure the platform-owned `MUX_TOKEN_ID`, `MUX_TOKEN_SECRET`, `MUX_SIGNING_KEY_ID`, and `MUX_SIGNING_KEY_PRIVATE_KEY` as server-only environment variables locally and in Vercel; never expose them with a `NEXT_PUBLIC_` prefix. LearnHub is responsible for Mux billing and account limits. Apply migrations `20261103000300` and `20261103000400` along with the existing schema migrations. New Mux uploads use signed playback IDs, and LearnHub issues playback tokens only for free previews or approved enrollments. Existing public Mux playback IDs and legacy Cloudflare Stream videos are still directly accessible to anyone with their playback URL; replace or reconfigure those assets for signed playback before treating them as protected.
 
 Instructor onboarding requires a confirmed, signed-in Supabase Auth user. Each authenticated instructor can create at most one Basic tenant; the slug, owner, and theme are saved in Supabase and are publicly readable at `NEXT_PUBLIC_APP_URL/tenants/<slug>`. Returning instructors are shown a direct link to their existing site. Pro and Academy tenant activation remains unavailable until payment verification is integrated. Never put the Supabase service-role key in `NEXT_PUBLIC_*` variables or browser code.
 
@@ -210,17 +213,17 @@ npm run dev
 ```
 
 ### 3. Test the App in Your Browser
-* **Main Landing & Academy Creator:** [http://localhost:3000](http://localhost:3000)
+* **Main Landing & Academy Creator:** [http://localhost:8000](http://localhost:8000)
   * Click the **"العربية" / "English"** button in the header to switch languages instantly.
   * Test creating a new subdomain in 60 seconds.
   * Student share links use `NEXT_PUBLIC_APP_URL` (defaults to `https://instruct-hub.vercel.app`) followed by `/tenants/<slug>`.
-* **Instructor Portal:** [http://localhost:3000/app](http://localhost:3000/app)
+* **Instructor Portal:** [http://localhost:8000/app](http://localhost:8000/app)
   * Review pending receipts, click **Approve** or **Reject**, view live quota bars, and test adding lectures.
 * **End-to-end payment demo:** On the course page, sign in with demo student `01011223344` / PIN `1234`, upload an image receipt (2 MB maximum), and submit. The request appears in the instructor portal in the same browser profile. Approve it, then reload the classroom to unlock paid lectures. The demo student `01122334455` / PIN `5678` is already approved.
 * **Live Tenant Storefronts:**
-  * **Physics Academy Demo:** [http://localhost:3000/tenants/physics-pro](http://localhost:3000/tenants/physics-pro)
-  * **Course Details & Checkout:** [http://localhost:3000/tenants/physics-pro/courses/course-phy-101](http://localhost:3000/tenants/physics-pro/courses/course-phy-101)
-  * **Student Classroom & AI Bot:** [http://localhost:3000/tenants/physics-pro/learn/course-phy-101](http://localhost:3000/tenants/physics-pro/learn/course-phy-101)
+  * **Physics Academy Demo:** [http://localhost:8000/tenants/physics-pro](http://localhost:8000/tenants/physics-pro)
+  * **Course Details & Checkout:** [http://localhost:8000/tenants/physics-pro/courses/course-phy-101](http://localhost:8000/tenants/physics-pro/courses/course-phy-101)
+  * **Student Classroom & AI Bot:** [http://localhost:8000/tenants/physics-pro/learn/course-phy-101](http://localhost:8000/tenants/physics-pro/learn/course-phy-101)
 
 ### 4. Build for Production
 ```bash

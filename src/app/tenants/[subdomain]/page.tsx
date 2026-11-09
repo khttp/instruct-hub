@@ -5,11 +5,11 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { initialTenants, initialCourses } from '@/lib/data-store';
 import { Course, Tenant } from '@/types/database';
-import { Video, ArrowRight, ShieldCheck, CheckCircle2, User, LogOut, Phone } from 'lucide-react';
+import { Video, ArrowRight, ShieldCheck, CheckCircle2, User, LogOut, Mail } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
-import { setActiveStudentSession, useStudentSession } from '@/lib/student-auth';
+import { signOutStudent, useStudentSession } from '@/lib/student-auth';
 import { getTenantUrl } from '@/lib/tenant-url';
 import { supabase } from '@/lib/supabase/client';
 
@@ -85,8 +85,12 @@ export default function TenantPage() {
     };
   }, [knownTenant, subdomain]);
 
-  const handleLogout = () => {
-    setActiveStudentSession(null);
+  const handleLogout = async () => {
+    try {
+      await signOutStudent();
+    } catch (error) {
+      console.error('Could not sign out student:', error);
+    }
   };
 
   const t = translations[locale].storefront;
@@ -146,7 +150,7 @@ export default function TenantPage() {
                 </div>
                 <div className="hidden sm:block text-start leading-tight">
                   <div className="font-bold text-white text-xs">{student.fullName}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{student.phoneNumber}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{student.email}</div>
                 </div>
                 <button
                   onClick={handleLogout}
@@ -161,8 +165,8 @@ export default function TenantPage() {
                 onClick={() => setIsAuthModalOpen(true)}
                 className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors"
               >
-                <Phone className="w-3.5 h-3.5 text-sky-400" />
-                <span>{isRtl ? 'دخول الطالب (بالهاتف و PIN)' : 'Student Login'}</span>
+                <Mail className="w-3.5 h-3.5 text-sky-400" />
+                <span>{isRtl ? 'دخول الطالب بالبريد الإلكتروني' : 'Student Login'}</span>
               </button>
             )}
 

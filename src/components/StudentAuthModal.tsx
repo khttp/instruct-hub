@@ -1,14 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import {
-  StudentUser,
-  getStoredStudents,
-  saveStudentUser,
-  setActiveStudentSession,
-  validateEgyptianPhone,
-} from '@/lib/student-auth';
-import { Phone, Lock, User, CheckCircle2, AlertCircle, X, Sparkles } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+import { User, Lock, Mail, CheckCircle2, AlertCircle, X } from 'lucide-react';
+import { StudentUser } from '@/lib/student-auth';
 import { Locale } from '@/lib/i18n';
 
 interface StudentAuthModalProps {
@@ -26,295 +21,201 @@ export function StudentAuthModal({
 }: StudentAuthModalProps) {
   const isRtl = locale === 'ar';
   const [tab, setTab] = useState<'login' | 'signup'>('login');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [pin, setPin] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [notice, setNotice] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setErrorMessage('');
+    setNotice('');
+    setIsSubmitting(true);
 
-    if (!validateEgyptianPhone(phoneNumber)) {
-      setErrorMessage(
-        isRtl
-          ? 'يرجى إدخال رقم موبايل مصري صحيح مكون من 11 رقم (مثال: 01012345678)'
-          : 'Please enter a valid 11-digit Egyptian phone number (e.g. 01012345678)'
-      );
-      return;
+    try {
+      if (tab === 'signup') {
+        if (!fullName.trim()) {
+          throw new Error(isRtl ? 'يرجى إدخال اسم الطالب.' : 'Enter the student’s name.');
+        }
+        if (password.length < 8) {
+          throw new Error(isRtl ? 'يجب أن تتكون كلمة المرور من 8 أحرف على الأقل.' : 'Password must be at least 8 characters.');
+        }
+
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { data: { full_name: fullName.trim() } },
+        });
+        if (error) throw error;
+
+        if (!data.session || !data.user) {
+          setNotice(isRtl
+            ? 'تم إنشاء الحساب. افتح رسالة التأكيد في بريدك الإلكتروني ثم سجّل الدخول.'
+            : 'Account created. Confirm your email using the link we sent, then sign in.');
+          setTab('login');
+          return;
+        }
+
+        onSuccess?.({
+          id: data.user.id,
+          email: data.user.email ?? email.trim(),
+          fullName: fullName.trim(),
+        });
+      } else {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+        if (!data.user) throw new Error('Sign-in did not return a user.');
+
+        onSuccess?.({
+          id: data.user.id,
+          email: data.user.email ?? email.trim(),
+          fullName: typeof data.user.user_metadata.full_name === 'string'
+            ? data.user.user_metadata.full_name
+            : data.user.email ?? email.trim(),
+        });
+      }
+
+      onClose();
+    } catch (error) {
+      setErrorMessage(error instanceof Error
+        ? error.message
+        : (isRtl ? 'تعذر تسجيل الدخول. حاول مرة أخرى.' : 'Could not authenticate. Please try again.'));
+    } finally {
+      setIsSubmitting(false);
     }
-
-    if (!pin || pin.length < 4) {
-      setErrorMessage(
-        isRtl ? 'الرقم السري PIN يجب أن يتكون من 4 أرقام على الأقل' : 'PIN must be at least 4 digits'
-      );
-      return;
-    }
-
-    const students = getStoredStudents();
-    const cleanPhone = phoneNumber.trim();
-    const user = students.find((s) => s.phoneNumber === cleanPhone && s.pin === pin);
-
-    if (!user) {
-      setErrorMessage(
-        isRtl
-          ? 'رقم الموبايل أو الرقم السري غير صحيح. يمكنك إنشاء حساب جديد إذا كانت أول مرة.'
-          : 'Incorrect phone number or PIN. You can create a new account if this is your first visit.'
-      );
-      return;
-    }
-
-    setActiveStudentSession(user);
-    onSuccess?.(user);
-    onClose();
-  };
-
-  const handleSignup = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage('');
-
-    if (!fullName.trim()) {
-      setErrorMessage(isRtl ? 'يرجى إدخال اسمك ثلاثي' : 'Please enter your full name');
-      return;
-    }
-
-    if (!validateEgyptianPhone(phoneNumber)) {
-      setErrorMessage(
-        isRtl
-          ? 'يرجى إدخال رقم موبايل مصري صحيح يبدأ بـ 010 أو 011 أو 012 أو 015'
-          : 'Please enter a valid 11-digit Egyptian mobile number'
-      );
-      return;
-    }
-
-    if (!pin || pin.length < 4) {
-      setErrorMessage(
-        isRtl ? 'الرقم السري PIN يجب أن يتكون من 4 أرقام على الأقل' : 'PIN must be at least 4 digits'
-      );
-      return;
-    }
-
-    const students = getStoredStudents();
-    const cleanPhone = phoneNumber.trim();
-    if (students.some((s) => s.phoneNumber === cleanPhone)) {
-      setErrorMessage(
-        isRtl
-          ? 'رقم الموبايل مسجل بالفعل! يرجى تسجيل الدخول بدلاً من ذلك.'
-          : 'This phone number is already registered! Please log in.'
-      );
-      return;
-    }
-
-    const newStudent: StudentUser = {
-      phoneNumber: cleanPhone,
-      pin,
-      fullName: fullName.trim(),
-      enrolledCourseIds: [],
-    };
-
-    saveStudentUser(newStudent);
-    setActiveStudentSession(newStudent);
-    onSuccess?.(newStudent);
-    onClose();
-  };
-
-  const fillDemoStudent = () => {
-    setTab('login');
-    setPhoneNumber('01011223344');
-    setPin('1234');
-    setErrorMessage('');
   };
 
   return (
     <div
       dir={isRtl ? 'rtl' : 'ltr'}
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
     >
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl relative">
-        {/* Close Button */}
+      <div className="relative w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl sm:p-8">
         <button
+          type="button"
           onClick={onClose}
-          className={`absolute top-5 ${isRtl ? 'left-5' : 'right-5'} p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors`}
+          aria-label={isRtl ? 'إغلاق' : 'Close'}
+          className={`absolute top-5 ${isRtl ? 'left-5' : 'right-5'} rounded-xl p-2 text-slate-400 hover:bg-slate-800 hover:text-white`}
         >
-          <X className="w-5 h-5" />
+          <X className="h-5 w-5" />
         </button>
 
-        {/* Header */}
         <div className="mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 flex items-center justify-center mb-3 border border-sky-500/20">
-            <Phone className="w-6 h-6" />
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-500/20 bg-sky-500/10 text-sky-400">
+            <User className="h-6 w-6" />
           </div>
-          <h3 className="text-xl font-bold text-white">
-            {isRtl ? 'بوابة دخول الطلاب' : 'Student Access Portal'}
-          </h3>
-          <p className="text-xs text-slate-400 mt-1">
-            {isRtl
-              ? 'تسجيل دخول سريع برقم الموبايل والرقم السري (بدون إيميل)'
-              : 'Fast login with your mobile phone & PIN (No email needed)'}
+          <h3 className="text-xl font-bold text-white">{isRtl ? 'حساب الطالب' : 'Student account'}</h3>
+          <p className="mt-1 text-xs text-slate-400">
+            {isRtl ? 'سجّل دخولك ببريدك الإلكتروني لمتابعة طلباتك وكورساتك.' : 'Sign in with email to track your course requests and access.'}
           </p>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl mb-6 border border-slate-800">
+        <div className="mb-6 grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950 p-1">
           <button
             type="button"
-            onClick={() => {
-              setTab('login');
-              setErrorMessage('');
-            }}
-            className={`py-2 rounded-lg text-xs font-bold transition-all ${
-              tab === 'login'
-                ? 'bg-sky-600 text-white shadow'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            onClick={() => { setTab('login'); setErrorMessage(''); setNotice(''); }}
+            className={`rounded-lg py-2 text-xs font-bold ${tab === 'login' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}
           >
-            {isRtl ? 'تسجيل دخول' : 'Student Login'}
+            {isRtl ? 'تسجيل دخول' : 'Sign in'}
           </button>
           <button
             type="button"
-            onClick={() => {
-              setTab('signup');
-              setErrorMessage('');
-            }}
-            className={`py-2 rounded-lg text-xs font-bold transition-all ${
-              tab === 'signup'
-                ? 'bg-sky-600 text-white shadow'
-                : 'text-slate-400 hover:text-white'
-            }`}
+            onClick={() => { setTab('signup'); setErrorMessage(''); setNotice(''); }}
+            className={`rounded-lg py-2 text-xs font-bold ${tab === 'signup' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}
           >
-            {isRtl ? 'حساب طالب جديد' : 'New Student'}
+            {isRtl ? 'حساب جديد' : 'Create account'}
           </button>
         </div>
 
         {errorMessage && (
-          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-            <span>{errorMessage}</span>
+          <div role="alert" className="mb-4 flex items-center gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
+            <AlertCircle className="h-4 w-4 shrink-0" /> {errorMessage}
+          </div>
+        )}
+        {notice && (
+          <div role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-300">
+            <CheckCircle2 className="h-4 w-4 shrink-0" /> {notice}
           </div>
         )}
 
-        {/* Login Form */}
-        {tab === 'login' && (
-          <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
+          {tab === 'signup' && (
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                {isRtl ? 'رقم الموبايل (المصري)' : 'Mobile Phone Number'}
+              <label htmlFor="student-full-name" className="mb-1.5 block text-xs font-semibold text-slate-400">
+                {isRtl ? 'اسم الطالب' : 'Student name'}
               </label>
-              <div dir="ltr" className="relative">
+              <div className="relative">
+                <User className={`absolute top-3 h-4 w-4 text-slate-500 ${isRtl ? 'right-3' : 'left-3'}`} />
                 <input
-                  type="tel"
+                  id="student-full-name"
+                  type="text"
+                  autoComplete="name"
                   required
-                  placeholder="01012345678"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                  maxLength={255}
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                  className={`w-full rounded-xl border border-slate-800 bg-slate-950 py-3 text-sm text-white focus:border-sky-500 focus:outline-none ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
                 />
               </div>
             </div>
+          )}
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                {isRtl ? 'الرقم السري (PIN)' : 'Security PIN (4 digits)'}
-              </label>
-              <div dir="ltr" className="relative">
-                <input
-                  type="password"
-                  required
-                  maxLength={6}
-                  placeholder="••••"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500 text-center tracking-widest text-lg"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-sky-600/30 transition-all mt-2"
-            >
-              {isRtl ? 'تسجيل الدخول ومتابعة الكورس' : 'Log In & Continue Course'}
-            </button>
-          </form>
-        )}
-
-        {/* Signup Form */}
-        {tab === 'signup' && (
-          <form onSubmit={handleSignup} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                {isRtl ? 'اسم الطالب بالكامل (ثلاثي)' : 'Student Full Name'}
-              </label>
+          <div>
+            <label htmlFor="student-email" className="mb-1.5 block text-xs font-semibold text-slate-400">
+              {isRtl ? 'البريد الإلكتروني' : 'Email'}
+            </label>
+            <div className="relative">
+              <Mail className={`absolute top-3 h-4 w-4 text-slate-500 ${isRtl ? 'right-3' : 'left-3'}`} />
               <input
-                type="text"
+                id="student-email"
+                type="email"
+                autoComplete="email"
                 required
-                placeholder={isRtl ? 'مثال: يوسف محمد أحمد' : 'e.g. Youssef Mohamed'}
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className={`w-full rounded-xl border border-slate-800 bg-slate-950 py-3 text-sm text-white focus:border-sky-500 focus:outline-none ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
               />
             </div>
+          </div>
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                {isRtl ? 'رقم الموبايل (فودافون/أورنج/اتصالات/وي)' : 'Egyptian Mobile Number'}
-              </label>
-              <div dir="ltr">
-                <input
-                  type="tel"
-                  required
-                  placeholder="01012345678"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
-                />
-              </div>
+          <div>
+            <label htmlFor="student-password" className="mb-1.5 block text-xs font-semibold text-slate-400">
+              {isRtl ? 'كلمة المرور' : 'Password'}
+            </label>
+            <div className="relative">
+              <Lock className={`absolute top-3 h-4 w-4 text-slate-500 ${isRtl ? 'right-3' : 'left-3'}`} />
+              <input
+                id="student-password"
+                type="password"
+                autoComplete={tab === 'signup' ? 'new-password' : 'current-password'}
+                required
+                minLength={tab === 'signup' ? 8 : undefined}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                className={`w-full rounded-xl border border-slate-800 bg-slate-950 py-3 text-sm text-white focus:border-sky-500 focus:outline-none ${isRtl ? 'pr-10 pl-4' : 'pl-10 pr-4'}`}
+              />
             </div>
+          </div>
 
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                {isRtl ? 'اختر رقماً سرياً (PIN مكون من 4 أرقام)' : 'Choose a 4-Digit PIN'}
-              </label>
-              <div dir="ltr">
-                <input
-                  type="password"
-                  required
-                  maxLength={6}
-                  placeholder="1234"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500 text-center tracking-widest text-lg"
-                />
-              </div>
-              <span className="text-[11px] text-slate-500 mt-1 block">
-                {isRtl ? 'احفظ هذا الرقم السري لتسجيل الدخول به دائماً' : 'Remember this PIN for future logins'}
-              </span>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-emerald-600/30 transition-all mt-2"
-            >
-              {isRtl ? 'إنشاء حسابي ومتابعة الشرح' : 'Create Account & Continue'}
-            </button>
-          </form>
-        )}
-
-        {/* Demo Fast Login Helper */}
-        <div className="mt-5 pt-4 border-t border-slate-800 text-center">
           <button
-            type="button"
-            onClick={fillDemoStudent}
-            className="text-xs text-sky-400 hover:text-sky-300 font-semibold inline-flex items-center gap-1.5"
+            type="submit"
+            disabled={isSubmitting}
+            className="mt-2 w-full rounded-xl bg-sky-600 py-3.5 text-sm font-bold text-white shadow-lg shadow-sky-600/30 transition-all hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>
-              {isRtl ? 'تجربة سريعة كطالب تجريبي (يوسف - 01011223344)' : 'Fill Demo Student (Youssef - 01011223344)'}
-            </span>
+            {isSubmitting
+              ? (isRtl ? 'جارٍ التنفيذ...' : 'Please wait...')
+              : tab === 'login'
+                ? (isRtl ? 'تسجيل الدخول' : 'Sign in')
+                : (isRtl ? 'إنشاء حساب طالب' : 'Create student account')}
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );

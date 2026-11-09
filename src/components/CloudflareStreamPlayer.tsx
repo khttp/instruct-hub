@@ -1,32 +1,95 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Wifi, Gauge } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
 
 interface CloudflareStreamPlayerProps {
-  streamId: string;
+  streamId?: string | null;
+  muxPlaybackId?: string | null;
+  courseId: string;
+  lectureId: string;
   title: string;
   onEnded?: () => void;
 }
 
-export function CloudflareStreamPlayer({ streamId, title }: CloudflareStreamPlayerProps) {
+export function CloudflareStreamPlayer({ streamId, muxPlaybackId, courseId, lectureId, title }: CloudflareStreamPlayerProps) {
   const [dataSaverMode, setDataSaverMode] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [playbackState, setPlaybackState] = useState<{
+    lectureId: string;
+    muxPlaybackId: string;
+    token?: string;
+    error?: string;
+  } | null>(null);
 
-  // Video Streaming URL
-  const streamUrl = `https://customer-m033p5x0q6nfd92u.cloudflarestream.com/${streamId}/iframe?preload=auto&poster=https%3A%2F%2Fcustomer-m033p5x0q6nfd92u.cloudflarestream.com%2F${streamId}%2Fthumbnails%2Fthumbnail.jpg%3Ftime%3D5s%26height%3D600`;
+  useEffect(() => {
+    if (!muxPlaybackId) return;
+
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        const response = await fetch(
+          `/api/mux/playback-token?lectureId=${encodeURIComponent(lectureId)}`,
+          {
+            headers: sessionData.session
+              ? { Authorization: `Bearer ${sessionData.session.access_token}` }
+              : {},
+            cache: 'no-store',
+            signal: controller.signal,
+          }
+        );
+        const result = await response.json() as { token?: string; error?: string };
+        if (!response.ok || !result.token) {
+          throw new Error(result.error || 'Could not authorize video playback.');
+        }
+        setPlaybackState({ lectureId, muxPlaybackId, token: result.token });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setPlaybackState({
+          lectureId,
+          muxPlaybackId,
+          error: error instanceof Error ? error.message : 'Could not authorize video playback.',
+        });
+      }
+    })();
+
+    return () => controller.abort();
+  }, [courseId, lectureId, muxPlaybackId]);
+
+  const currentPlayback = playbackState?.lectureId === lectureId
+    && playbackState.muxPlaybackId === muxPlaybackId
+    ? playbackState
+    : null;
+  const muxToken = currentPlayback?.token ?? null;
+  const playbackError = currentPlayback?.error ?? '';
+  const muxStreamUrl = muxPlaybackId && muxToken
+    ? `https://player.mux.com/${encodeURIComponent(muxPlaybackId)}?token=${encodeURIComponent(muxToken)}`
+    : null;
+  const cloudflareStreamUrl = streamId
+    ? `https://customer-m033p5x0q6nfd92u.cloudflarestream.com/${encodeURIComponent(streamId)}/iframe?preload=auto&poster=https%3A%2F%2Fcustomer-m033p5x0q6nfd92u.cloudflarestream.com%2F${encodeURIComponent(streamId)}%2Fthumbnails%2Fthumbnail.jpg%3Ftime%3D5s%26height%3D600`
+    : null;
 
   return (
     <div className="w-full bg-slate-950 rounded-2xl overflow-hidden shadow-2xl border border-slate-800">
       {/* Player Frame */}
       <div className="relative aspect-video w-full bg-black">
-        <iframe
-          src={streamUrl}
-          className="absolute inset-0 w-full h-full border-0"
-          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-          allowFullScreen
-          title={title}
-        />
+        {muxStreamUrl || (!muxPlaybackId && cloudflareStreamUrl) ? (
+          <iframe
+            src={muxStreamUrl || cloudflareStreamUrl || undefined}
+            className="absolute inset-0 w-full h-full border-0"
+            allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
+            allowFullScreen
+            title={title}
+          />
+        ) : (
+          <div role={playbackError ? 'alert' : 'status'} className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-slate-300">
+            {playbackError || 'Authorizing secure video playback...'}
+          </div>
+        )}
       </div>
 
       {/* Egyptian Low-Bandwidth & Mobile Data Optimization Bar */}

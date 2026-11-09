@@ -1,16 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { initialTenants, initialCourses, initialLectures } from '@/lib/data-store';
 import { CloudflareStreamPlayer } from '@/components/CloudflareStreamPlayer';
 import { ArrowLeft, ArrowRight, CheckCircle2, Bot, Send, Sparkles } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { useStudentSession } from '@/lib/student-auth';
-import { useEnrollments } from '@/lib/enrollment-store';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
+import { supabase } from '@/lib/supabase/client';
+import { Course, Lecture, Tenant } from '@/types/database';
 
 export default function StudentClassroomPage() {
   const params = useParams();
@@ -22,22 +22,82 @@ export default function StudentClassroomPage() {
   const t = translations[locale].classroom;
   const isRtl = locale === 'ar';
   const student = useStudentSession();
-  const enrollments = useEnrollments();
-
-  const tenant = initialTenants[subdomain] || initialTenants['physics-pro'];
-  const course = initialCourses.find((c) => c.id === courseId) || initialCourses[0];
-  const lectures = initialLectures.filter((l) => l.course_id === course.id);
-  const isEnrolled = enrollments.some(
-    (enrollment) =>
-      enrollment.course_id === course.id &&
-      enrollment.student_id === student?.phoneNumber &&
-      enrollment.payment_status === 'approved'
-  );
-
-  const [currentLecture, setCurrentLecture] = useState(
-    lectures.find((lecture) => lecture.is_free_preview) || null
-  );
+  const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [course, setCourse] = useState<Course | null>(null);
+  const [lectures, setLectures] = useState<Lecture[]>([]);
+  const [isEnrolled, setIsEnrolled] = useState(false);
+  const [pageStatus, setPageStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [loadedKey, setLoadedKey] = useState('');
+  const [currentLecture, setCurrentLecture] = useState<Lecture | null>(null);
   const [completedLectureIds, setCompletedLectureIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const { data: tenantData, error: tenantError } = await supabase
+          .from('tenants')
+          .select('*')
+          .eq('subdomain', subdomain)
+          .maybeSingle();
+        if (tenantError) throw tenantError;
+        if (!tenantData) throw new Error('Academy not found.');
+
+        const { data: courseData, error: courseError } = await supabase
+          .from('courses')
+          .select('*')
+          .eq('id', courseId)
+          .eq('tenant_id', tenantData.id)
+          .maybeSingle();
+        if (courseError) throw courseError;
+        if (!courseData) throw new Error('Course not found or not published.');
+
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError) throw sessionError;
+        let approved = false;
+        if (sessionData.session) {
+          const { data: enrollment, error: enrollmentError } = await supabase
+            .from('enrollments')
+            .select('payment_status')
+            .eq('course_id', courseId)
+            .eq('student_id', sessionData.session.user.id)
+            .maybeSingle();
+          if (enrollmentError) throw enrollmentError;
+          approved = enrollment?.payment_status === 'approved';
+        }
+
+        const { data: lectureData, error: lectureError } = await supabase
+          .from('lectures')
+          .select('*')
+          .eq('course_id', courseId)
+          .order('sort_order', { ascending: true });
+        if (lectureError) throw lectureError;
+        if (!active) return;
+
+        const loadedLectures = (lectureData ?? []) as Lecture[];
+        setTenant(tenantData as Tenant);
+        setCourse(courseData as Course);
+        setLectures(loadedLectures);
+        setIsEnrolled(approved);
+        setCurrentLecture(
+          approved
+            ? loadedLectures[0] ?? null
+            : loadedLectures.find((lecture) => lecture.is_free_preview) ?? null
+        );
+        setLoadedKey(`${subdomain}:${courseId}:${sessionData.session?.user.id ?? 'anonymous'}`);
+        setPageStatus('ready');
+      } catch (error) {
+        if (!active) return;
+        console.error('Could not load student classroom:', error);
+        setPageStatus('error');
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [courseId, student?.id, subdomain]);
 
   // AI Assistant Chat state
   const [aiChatMessages, setAiChatMessages] = useState<Array<{ sender: 'ai' | 'user'; text: string }>>([
@@ -75,6 +135,18 @@ export default function StudentClassroomPage() {
     );
   };
 
+  const currentRequestKey = `${subdomain}:${courseId}:${student?.id ?? 'anonymous'}`;
+  if (pageStatus !== 'ready' || loadedKey !== currentRequestKey || !tenant || !course) {
+    const message = pageStatus === 'error'
+      ? (isRtl ? 'تعذر تحميل هذا الكورس أو لا تملك صلاحية الوصول.' : 'Could not load this course or access is unavailable.')
+      : (isRtl ? 'جارٍ تحميل الفصل...' : 'Loading classroom...');
+    return (
+      <main dir={isRtl ? 'rtl' : 'ltr'} className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center p-6 text-center">
+        <p role={pageStatus === 'error' ? 'alert' : 'status'}>{message}</p>
+      </main>
+    );
+  }
+
   return (
     <div dir={isRtl ? 'rtl' : 'ltr'} className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Bar */}
@@ -109,7 +181,10 @@ export default function StudentClassroomPage() {
             <div>
               <CloudflareStreamPlayer
                 streamId={currentLecture.cloudflare_stream_id}
+                muxPlaybackId={currentLecture.mux_playback_id}
                 title={currentLecture.title}
+                courseId={course.id}
+                lectureId={currentLecture.id}
               />
               <div className="mt-4 flex items-center justify-between">
                 <div>

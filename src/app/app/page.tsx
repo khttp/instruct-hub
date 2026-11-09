@@ -2,9 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { initialTenants, initialCourses, initialEnrollments, checkTenantQuota } from '@/lib/data-store';
-import { Course, Lecture, SubscriptionTier, QUOTA_TIER_LIMITS, Tenant } from '@/types/database';
-import { updateEnrollmentStatus, useEnrollments } from '@/lib/enrollment-store';
+import { initialTenants, checkTenantQuota } from '@/lib/data-store';
+import { Course, Enrollment, Lecture, Profile, SubscriptionTier, QUOTA_TIER_LIMITS, Tenant } from '@/types/database';
 import {
   Users,
   HardDrive,
@@ -35,7 +34,9 @@ export default function InstructorDashboard() {
   const [baseTenant, setTenant] = useState(initialTenants['physics-pro']);
   const [dashboardStatus, setDashboardStatus] = useState<'loading' | 'signed-out' | 'no-site' | 'ready' | 'error'>('loading');
   const [dashboardError, setDashboardError] = useState('');
-  const enrollments = useEnrollments();
+  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [studentNames, setStudentNames] = useState<Record<string, { fullName: string; email: string }>>({});
+  const [enrollmentError, setEnrollmentError] = useState('');
   const [courses, setCourses] = useState<Course[]>([]);
   const [lectures, setLectures] = useState<Lecture[]>([]);
   const tenantCourseIds = new Set(courses.filter((course) => course.tenant_id === baseTenant.id).map((course) => course.id));
@@ -44,20 +45,9 @@ export default function InstructorDashboard() {
       .filter((enrollment) => tenantCourseIds.has(enrollment.course_id) && enrollment.payment_status === 'approved')
       .map((enrollment) => enrollment.student_id)
   );
-  const initialTenantCourseIds = new Set(
-    initialCourses.filter((course) => course.tenant_id === baseTenant.id).map((course) => course.id)
-  );
-  const initialActiveStudentIds = new Set(
-    initialEnrollments
-      .filter((enrollment) => initialTenantCourseIds.has(enrollment.course_id) && enrollment.payment_status === 'approved')
-      .map((enrollment) => enrollment.student_id)
-  );
   const tenant = {
     ...baseTenant,
-    active_students_count: Math.max(
-      0,
-      baseTenant.active_students_count + activeStudentIds.size - initialActiveStudentIds.size
-    ),
+    active_students_count: activeStudentIds.size,
   };
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState<string | null>(null);
 
@@ -71,16 +61,8 @@ export default function InstructorDashboard() {
   const [newCoursePrice, setNewCoursePrice] = useState('350');
   const [newCourseDesc, setNewCourseDesc] = useState('');
   const [newCourseThumbnailUrl, setNewCourseThumbnailUrl] = useState('');
-  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [isCreatingCourse, setIsCreatingCourse] = useState(false);
   const [courseError, setCourseError] = useState('');
-  const [isAddLectureOpen, setIsAddLectureOpen] = useState(false);
-  const [targetCourseId, setTargetCourseId] = useState('');
-  const [newLectureTitle, setNewLectureTitle] = useState('');
-  const [newLectureDescription, setNewLectureDescription] = useState('');
-  const [newLectureStreamId, setNewLectureStreamId] = useState('');
-  const [isFreePreview, setIsFreePreview] = useState(false);
-  const [isCreatingLecture, setIsCreatingLecture] = useState(false);
 
   const t = translations[locale].dashboard;
   const isRtl = locale === 'ar';
@@ -125,12 +107,36 @@ export default function InstructorDashboard() {
             .order('sort_order', { ascending: true })
           : { data: [], error: null };
         if (lecturesError) throw lecturesError;
+        const { data: enrollmentData, error: enrollmentsError } = courseIds.length > 0
+          ? await supabase
+            .from('enrollments')
+            .select('*')
+            .in('course_id', courseIds)
+            .order('created_at', { ascending: false })
+          : { data: [], error: null };
+        if (enrollmentsError) throw enrollmentsError;
+
+        const loadedEnrollments = (enrollmentData ?? []) as Enrollment[];
+        const studentIds = [...new Set(loadedEnrollments.map((enrollment) => enrollment.student_id))];
+        const { data: profileData, error: profilesError } = studentIds.length > 0
+          ? await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .in('id', studentIds)
+          : { data: [], error: null };
+        if (profilesError) throw profilesError;
         if (!active) return;
 
         setTenant(tenantData as Tenant);
         setCourses(loadedCourses);
         setLectures((lectureData ?? []) as Lecture[]);
-        setTargetCourseId(loadedCourses[0]?.id ?? '');
+        setEnrollments(loadedEnrollments);
+        setStudentNames(Object.fromEntries(
+          ((profileData ?? []) as Pick<Profile, 'id' | 'full_name' | 'email'>[]).map((profile) => [
+            profile.id,
+            { fullName: profile.full_name, email: profile.email ?? '' },
+          ])
+        ));
         setDashboardStatus('ready');
       } catch (error) {
         if (!active) return;
@@ -161,10 +167,39 @@ export default function InstructorDashboard() {
   )}`;
 
   // Approve or Reject Enrollment
-  const handleToggleEnrollmentStatus = (enrollmentId: string, status: 'approved' | 'rejected' | 'pending') => {
+  const handleToggleEnrollmentStatus = async (enrollmentId: string, status: 'approved' | 'rejected') => {
     const enrollment = enrollments.find((item) => item.id === enrollmentId);
-    if (!enrollment || enrollment.payment_status === status) return;
-    updateEnrollmentStatus(enrollmentId, status);
+    if (!enrollment || enrollment.payment_status !== 'pending') return;
+    setEnrollmentError('');
+    try {
+      const { error } = await supabase.rpc('review_course_enrollment', {
+        p_enrollment_id: enrollmentId,
+        p_payment_status: status,
+      });
+      if (error) throw error;
+      setEnrollments((previous) => previous.map((item) => item.id === enrollmentId
+        ? { ...item, payment_status: status, reviewed_at: new Date().toISOString() }
+        : item));
+    } catch (error) {
+      setEnrollmentError(error instanceof Error
+        ? error.message
+        : (isRtl ? 'تعذر تحديث حالة الطلب.' : 'Could not update the request status.'));
+    }
+  };
+
+  const handleViewReceipt = async (receiptPath: string) => {
+    setEnrollmentError('');
+    try {
+      const { data, error } = await supabase.storage
+        .from('payment-receipts')
+        .createSignedUrl(receiptPath, 5 * 60);
+      if (error) throw error;
+      setSelectedReceiptUrl(data.signedUrl);
+    } catch (error) {
+      setEnrollmentError(error instanceof Error
+        ? error.message
+        : (isRtl ? 'تعذر فتح إيصال الدفع.' : 'Could not open the payment receipt.'));
+    }
   };
 
   // Add Course
@@ -204,25 +239,19 @@ export default function InstructorDashboard() {
         price_egp: price,
         thumbnail_url: thumbnailUrl || null,
       };
-      const query = editingCourseId
-        ? supabase
-          .from('courses')
-          .update(courseChanges)
-          .eq('id', editingCourseId)
-          .eq('tenant_id', tenant.id)
-        : supabase.from('courses').insert({
+      const { data, error } = await supabase
+        .from('courses')
+        .insert({
           ...courseChanges,
           tenant_id: tenant.id,
           is_published: false,
-        });
-      const { data, error } = await query.select('*').single();
+        })
+        .select('*')
+        .single();
       if (error) throw error;
 
-      setCourses((previous) => editingCourseId
-        ? previous.map((item) => item.id === editingCourseId ? data as Course : item)
-        : [data as Course, ...previous]);
+      setCourses((previous) => [data as Course, ...previous]);
       setIsAddCourseOpen(false);
-      setEditingCourseId(null);
       setNewCourseTitle('');
       setNewCoursePrice('350');
       setNewCourseDesc('');
@@ -232,16 +261,6 @@ export default function InstructorDashboard() {
     } finally {
       setIsCreatingCourse(false);
     }
-  };
-
-  const startEditingCourse = (course: Course) => {
-    setEditingCourseId(course.id);
-    setNewCourseTitle(course.title);
-    setNewCoursePrice(String(course.price_egp));
-    setNewCourseDesc(course.description ?? '');
-    setNewCourseThumbnailUrl(course.thumbnail_url ?? '');
-    setCourseError('');
-    setIsAddCourseOpen(true);
   };
 
   const handleDeleteCourse = async (course: Course) => {
@@ -266,6 +285,7 @@ export default function InstructorDashboard() {
         .eq('tenant_id', tenant.id);
       if (error) throw error;
       setCourses((previous) => previous.filter((item) => item.id !== course.id));
+      setEnrollments((previous) => previous.filter((item) => item.course_id !== course.id));
     } catch (error) {
       setCourseError(error instanceof Error ? error.message : (isRtl ? 'تعذر حذف الكورس.' : 'Could not delete the course.'));
     }
@@ -292,55 +312,6 @@ export default function InstructorDashboard() {
       setCourses((previous) => previous.map((item) => item.id === course.id ? data as Course : item));
     } catch (error) {
       setCourseError(error instanceof Error ? error.message : (isRtl ? 'تعذر تحديث حالة الكورس.' : 'Could not update course status.'));
-    }
-  };
-
-  const handleCreateLecture = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const title = newLectureTitle.trim();
-    const streamId = newLectureStreamId.trim();
-    if (!targetCourseId || !title || !streamId) {
-      setCourseError(isRtl ? 'اختر كورساً وأدخل عنوان المحاضرة ومعرّف فيديو Cloudflare.' : 'Select a course and enter a lesson title and Cloudflare Stream video ID.');
-      return;
-    }
-
-    setCourseError('');
-    setIsCreatingLecture(true);
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) throw sessionError;
-      if (!sessionData.session) {
-        setDashboardStatus('signed-out');
-        return;
-      }
-
-      const nextSortOrder = lectures
-        .filter((lecture) => lecture.course_id === targetCourseId)
-        .reduce((maximum, lecture) => Math.max(maximum, lecture.sort_order), 0) + 1;
-      const { data, error } = await supabase
-        .from('lectures')
-        .insert({
-          course_id: targetCourseId,
-          title,
-          description: newLectureDescription.trim(),
-          cloudflare_stream_id: streamId,
-          sort_order: nextSortOrder,
-          is_free_preview: isFreePreview,
-        })
-        .select('*')
-        .single();
-      if (error) throw error;
-
-      setLectures((previous) => [...previous, data as Lecture]);
-      setIsAddLectureOpen(false);
-      setNewLectureTitle('');
-      setNewLectureDescription('');
-      setNewLectureStreamId('');
-      setIsFreePreview(false);
-    } catch (error) {
-      setCourseError(error instanceof Error ? error.message : (isRtl ? 'تعذر حفظ المحاضرة.' : 'Could not save the lesson.'));
-    } finally {
-      setIsCreatingLecture(false);
     }
   };
 
@@ -559,6 +530,7 @@ export default function InstructorDashboard() {
         {/* Tab 1: Manual Receipt Verification Dashboard */}
         {activeTab === 'receipts' && (
           <div className="space-y-4">
+            {enrollmentError && <p role="alert" className="text-sm text-rose-400">{enrollmentError}</p>}
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-white">{t.queueTitle}</h2>
@@ -571,7 +543,7 @@ export default function InstructorDashboard() {
                 <table className="w-full text-xs">
                   <thead className="bg-slate-950 text-slate-400 border-b border-slate-800 uppercase tracking-wider font-semibold">
                     <tr>
-                      <th className={`p-4 ${isRtl ? 'text-right' : 'text-left'}`}>{isRtl ? 'اسم الطالب / الهاتف' : 'Student / Phone'}</th>
+                      <th className={`p-4 ${isRtl ? 'text-right' : 'text-left'}`}>{isRtl ? 'اسم الطالب / البريد الإلكتروني' : 'Student / Email'}</th>
                       <th className={`p-4 ${isRtl ? 'text-right' : 'text-left'}`}>{isRtl ? 'الكورس' : 'Course'}</th>
                       <th className={`p-4 ${isRtl ? 'text-right' : 'text-left'}`}>{isRtl ? 'طريقة التحويل' : 'Payment Method'}</th>
                       <th className={`p-4 ${isRtl ? 'text-right' : 'text-left'}`}>{isRtl ? 'إيصال التحويل' : 'Transfer Screenshot'}</th>
@@ -582,9 +554,14 @@ export default function InstructorDashboard() {
                   <tbody className="divide-y divide-slate-800/60">
                     {enrollments.map((enr) => {
                       const course = courses.find((c) => c.id === enr.course_id);
+                      const profile = studentNames[enr.student_id];
+                      const receiptPath = enr.payment_receipt_url;
                       return (
                         <tr key={enr.id} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="p-4 font-medium text-slate-300">{enr.student_id}</td>
+                          <td className="p-4 font-medium text-slate-300">
+                            <span className="block">{profile?.fullName || (isRtl ? 'طالب' : 'Student')}</span>
+                            <span className="text-[11px] text-slate-500">{profile?.email || enr.student_id}</span>
+                          </td>
                           <td className="p-4 text-white font-medium">{course?.title || enr.course_id}</td>
                           <td className="p-4">
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold bg-slate-800 border border-slate-700 text-slate-300">
@@ -594,9 +571,9 @@ export default function InstructorDashboard() {
                             </span>
                           </td>
                           <td className="p-4">
-                            {enr.payment_receipt_url ? (
+                            {receiptPath ? (
                               <button
-                                onClick={() => setSelectedReceiptUrl(enr.payment_receipt_url || null)}
+                                onClick={() => void handleViewReceipt(receiptPath)}
                                 className="flex items-center gap-1 text-sky-400 hover:text-sky-300 font-semibold"
                               >
                                 <Eye className="w-3.5 h-3.5" /> {t.viewReceipt}
@@ -638,14 +615,7 @@ export default function InstructorDashboard() {
                                   <XCircle className="w-3.5 h-3.5" /> {t.reject}
                                 </button>
                               </div>
-                            ) : (
-                              <button
-                                onClick={() => handleToggleEnrollmentStatus(enr.id, 'pending')}
-                                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-400 text-[11px]"
-                              >
-                                {isRtl ? 'إعادة للمراجعة' : 'Reset Status'}
-                              </button>
-                            )}
+                            ) : null}
                           </td>
                         </tr>
                       );
@@ -667,20 +637,7 @@ export default function InstructorDashboard() {
               </div>
               <div className="flex gap-2">
                 <button
-                  type="button"
-                  disabled={courses.length === 0}
                   onClick={() => {
-                    setTargetCourseId(courses[0]?.id ?? '');
-                    setCourseError('');
-                    setIsAddLectureOpen(true);
-                  }}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-400 font-bold text-xs border border-slate-700 flex items-center gap-1.5 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Video className="w-3.5 h-3.5" /> {t.addLecture}
-                </button>
-                <button
-                  onClick={() => {
-                    setEditingCourseId(null);
                     setNewCourseTitle('');
                     setNewCoursePrice('350');
                     setNewCourseDesc('');
@@ -722,13 +679,12 @@ export default function InstructorDashboard() {
                       </span>
                     </div>
                     <div className="mb-4 flex justify-end gap-3">
-                      <button
-                        type="button"
-                        onClick={() => startEditingCourse(c)}
+                      <Link
+                        href={`/app/courses/${encodeURIComponent(c.id)}`}
                         className="inline-flex items-center gap-1 text-xs font-semibold text-slate-300 hover:text-white"
                       >
                         <Pencil className="h-3.5 w-3.5" /> {isRtl ? 'تعديل' : 'Edit'}
-                      </button>
+                      </Link>
                       <button
                         type="button"
                         onClick={() => void handleDeleteCourse(c)}
@@ -778,17 +734,12 @@ export default function InstructorDashboard() {
                     </div>
 
                     <div className="flex justify-between items-center pt-3 border-t border-slate-800 text-xs">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTargetCourseId(c.id);
-                          setCourseError('');
-                          setIsAddLectureOpen(true);
-                        }}
+                      <Link
+                        href={`/app/courses/${c.id}`}
                         className="text-emerald-400 hover:text-emerald-300 font-semibold"
                       >
-                        {isRtl ? '+ إضافة محاضرة' : '+ Add lesson'}
-                      </button>
+                        {isRtl ? 'تعديل الكورس والمحاضرات' : 'Edit course & lessons'}
+                      </Link>
                       <Link
                         href={`/tenants/${tenant.subdomain}/courses/${c.id}`}
                         target="_blank"
@@ -831,87 +782,6 @@ export default function InstructorDashboard() {
           </div>
         )}
 
-        {isAddLectureOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
-              <h3 className="mb-2 text-base font-bold text-white">{isRtl ? 'إضافة محاضرة للكورس' : 'Add lesson to course'}</h3>
-              <p className="mb-5 text-xs text-slate-400">
-                {isRtl
-                  ? 'ارفع الفيديو إلى Cloudflare Stream أولاً، ثم الصق معرّف الفيديو هنا.'
-                  : 'Upload your video to Cloudflare Stream first, then paste its video ID here.'}
-              </p>
-              <form onSubmit={(event) => void handleCreateLecture(event)} className="space-y-4 text-xs">
-                <div>
-                  <label htmlFor="lesson-course" className="mb-1 block font-semibold text-slate-400">{isRtl ? 'الكورس' : 'Course'}</label>
-                  <select
-                    id="lesson-course"
-                    required
-                    value={targetCourseId}
-                    onChange={(event) => setTargetCourseId(event.target.value)}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-white"
-                  >
-                    {courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="lesson-title" className="mb-1 block font-semibold text-slate-400">{isRtl ? 'عنوان المحاضرة' : 'Lesson title'}</label>
-                  <input
-                    id="lesson-title"
-                    required
-                    maxLength={255}
-                    value={newLectureTitle}
-                    onChange={(event) => setNewLectureTitle(event.target.value)}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="lesson-description" className="mb-1 block font-semibold text-slate-400">{isRtl ? 'الوصف (اختياري)' : 'Description (optional)'}</label>
-                  <textarea
-                    id="lesson-description"
-                    rows={3}
-                    value={newLectureDescription}
-                    onChange={(event) => setNewLectureDescription(event.target.value)}
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-white"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="lesson-stream-id" className="mb-1 block font-semibold text-slate-400">{isRtl ? 'معرّف فيديو Cloudflare Stream' : 'Cloudflare Stream video ID'}</label>
-                  <input
-                    id="lesson-stream-id"
-                    required
-                    maxLength={255}
-                    value={newLectureStreamId}
-                    onChange={(event) => setNewLectureStreamId(event.target.value)}
-                    placeholder="e.g. 5d5ba37938e5692697963b15b22692bf"
-                    className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 font-mono text-white"
-                  />
-                </div>
-                <label className="flex items-center gap-2 text-slate-300">
-                  <input type="checkbox" checked={isFreePreview} onChange={(event) => setIsFreePreview(event.target.checked)} />
-                  {isRtl ? 'إتاحة هذه المحاضرة كمعاينة مجانية' : 'Make this lesson a free preview'}
-                </label>
-                {courseError && <p role="alert" className="text-rose-400">{courseError}</p>}
-                <div className="flex justify-end gap-2 border-t border-slate-800 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddLectureOpen(false)}
-                    className="rounded-xl bg-slate-800 px-4 py-2 font-bold text-white hover:bg-slate-700"
-                  >
-                    {isRtl ? 'إلغاء' : 'Cancel'}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isCreatingLecture}
-                    className="rounded-xl bg-sky-600 px-4 py-2 font-bold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {isCreatingLecture ? (isRtl ? 'جارٍ الحفظ...' : 'Saving...') : (isRtl ? 'حفظ المحاضرة' : 'Save lesson')}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
         {/* Modal: Share Website to Students */}
         <ShareWebsiteModal
           isOpen={isShareModalOpen}
@@ -926,9 +796,7 @@ export default function InstructorDashboard() {
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
               <h3 className="text-base font-bold text-white mb-2">
-                {editingCourseId
-                  ? (isRtl ? 'تعديل الكورس' : 'Edit Course')
-                  : (isRtl ? 'إنشاء كورس جديد' : 'Create New Course')}
+                {isRtl ? 'إنشاء كورس جديد' : 'Create New Course'}
               </h3>
               <form onSubmit={(event) => void handleCreateCourse(event)} className="space-y-4 text-xs">
                 <div>
@@ -997,7 +865,6 @@ export default function InstructorDashboard() {
                     type="button"
                     onClick={() => {
                       setIsAddCourseOpen(false);
-                      setEditingCourseId(null);
                       setCourseError('');
                     }}
                     className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl"
@@ -1009,11 +876,7 @@ export default function InstructorDashboard() {
                     disabled={isCreatingCourse}
                     className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl shadow disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    {isCreatingCourse
-                      ? (isRtl ? 'جارٍ الحفظ...' : 'Saving...')
-                      : editingCourseId
-                        ? (isRtl ? 'حفظ التعديلات' : 'Save changes')
-                        : (isRtl ? 'إنشاء الكورس' : 'Create Course')}
+                    {isCreatingCourse ? (isRtl ? 'جارٍ الإنشاء...' : 'Creating...') : (isRtl ? 'إنشاء الكورس' : 'Create Course')}
                   </button>
                 </div>
               </form>

@@ -2,11 +2,11 @@
 
 import React, { useState } from 'react';
 import { Course, Tenant, PaymentMethod } from '@/types/database';
-import { Smartphone, CreditCard, UploadCloud, CheckCircle2, AlertCircle, Copy, Check, User, Phone } from 'lucide-react';
+import { Smartphone, CreditCard, UploadCloud, CheckCircle2, AlertCircle, Copy, Check, User, Mail } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { useStudentSession } from '@/lib/student-auth';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
-import { submitEnrollment } from '@/lib/enrollment-store';
+import { supabase } from '@/lib/supabase/client';
 
 interface ManualPaymentCheckoutProps {
   course: Course;
@@ -18,7 +18,8 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
   const [locale, setLocale] = useState<Locale>('ar'); // Default Egyptian Arabic
   const [method, setMethod] = useState<PaymentMethod>('manual_instapay');
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [receiptUrl, setReceiptUrl] = useState<string>('');
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState('');
   const [receiptError, setReceiptError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -42,8 +43,8 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
   const handleReceiptUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setReceiptError(isRtl ? 'يرجى اختيار ملف صورة.' : 'Please choose an image file.');
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+      setReceiptError(isRtl ? 'اختر صورة بصيغة JPG أو PNG أو WebP أو GIF.' : 'Choose a JPG, PNG, WebP, or GIF image.');
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -51,46 +52,60 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
       return;
     }
 
+    setReceiptFile(file);
+    setReceiptPreviewUrl('');
     const reader = new FileReader();
     reader.onload = () => {
-      if (typeof reader.result !== 'string') {
-        setReceiptError(isRtl ? 'تعذر قراءة الصورة. حاول مرة أخرى.' : 'The image could not be read. Please try again.');
-        return;
-      }
-      setReceiptUrl(reader.result);
-      setReceiptError('');
+      if (typeof reader.result === 'string') setReceiptPreviewUrl(reader.result);
     };
     reader.onerror = () => {
       setReceiptError(isRtl ? 'تعذر قراءة الصورة. حاول مرة أخرى.' : 'The image could not be read. Please try again.');
     };
     reader.readAsDataURL(file);
+    setReceiptError('');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!student) {
       setIsAuthModalOpen(true);
       return;
     }
 
-    if (!receiptUrl) {
-      alert(isRtl ? 'يرجى رفع صورة لإيصال التحويل أولاً.' : 'Please upload a screenshot of your transfer receipt.');
+    if (!receiptFile) {
+      setReceiptError(isRtl ? 'يرجى رفع صورة لإيصال التحويل أولاً.' : 'Please upload a screenshot of your transfer receipt.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const enrollment = submitEnrollment({
-        courseId: course.id,
-        studentId: student.phoneNumber,
-        paymentMethod: method,
-        receiptUrl,
-      });
-      if (!enrollment) {
-        setReceiptError(isRtl ? 'تم تفعيل هذا الكورس لحسابك بالفعل.' : 'This course is already approved for your account.');
-        return;
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw sessionError;
+      if (!sessionData.session || sessionData.session.user.id !== student.id) {
+        throw new Error(isRtl ? 'انتهت جلسة تسجيل الدخول. سجّل الدخول مرة أخرى.' : 'Your session expired. Please sign in again.');
       }
-      setIsSubmitting(false);
+
+      const extension = receiptFile.type.split('/')[1] || 'jpg';
+      const receiptPath = `${student.id}/${course.id}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from('payment-receipts')
+        .upload(receiptPath, receiptFile, {
+          cacheControl: '3600',
+          contentType: receiptFile.type,
+          upsert: false,
+        });
+      if (uploadError) throw uploadError;
+
+      const { error: enrollmentError } = await supabase.rpc('submit_course_enrollment', {
+        p_course_id: course.id,
+        p_payment_method: method,
+        p_receipt_path: receiptPath,
+      });
+      if (enrollmentError) {
+        const { error: cleanupError } = await supabase.storage.from('payment-receipts').remove([receiptPath]);
+        if (cleanupError) console.error('Could not remove receipt after failed enrollment submission:', cleanupError.message);
+        throw enrollmentError;
+      }
       setIsSubmitted(true);
       if (onSuccess) onSuccess();
     } catch (error) {
@@ -117,7 +132,7 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
 
         {student && (
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-950 rounded-xl text-xs text-sky-400 border border-slate-800 mb-4 font-mono">
-            <span>{isRtl ? 'اسم الطالب:' : 'Student:'} {student.fullName} ({student.phoneNumber})</span>
+            <span>{isRtl ? 'اسم الطالب:' : 'Student:'} {student.fullName} ({student.email})</span>
           </div>
         )}
 
@@ -164,14 +179,14 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
                 <span>{isRtl ? 'حساب الطالب:' : 'Student Account:'} {student.fullName}</span>
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
               </div>
-              <div className="text-[11px] text-slate-400 font-mono">{student.phoneNumber}</div>
+              <div className="text-[11px] text-slate-400 font-mono">{student.email}</div>
             </div>
           </div>
         ) : (
           <div className="flex items-center justify-between w-full">
             <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Phone className="w-4 h-4 text-sky-400" />
-              <span>{isRtl ? 'يجب تسجيل دخول الطالب بالهاتف و PIN للمتابعة' : 'Log in with mobile phone to enroll'}</span>
+              <Mail className="w-4 h-4 text-sky-400" />
+              <span>{isRtl ? 'سجّل دخولك ببريدك الإلكتروني لإرسال الطلب' : 'Sign in with email to submit a request'}</span>
             </div>
             <button
               type="button"
@@ -268,10 +283,10 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
               className="hidden"
               onChange={handleReceiptUpload}
             />
-            {receiptUrl ? (
+            {receiptPreviewUrl ? (
               <div className="text-center">
                 <img
-                  src={receiptUrl}
+                  src={receiptPreviewUrl}
                   alt="Receipt Preview"
                   className="max-h-40 rounded-lg mx-auto mb-2 border border-slate-700 shadow"
                 />
@@ -294,9 +309,9 @@ export function ManualPaymentCheckout({ course, tenant, onSuccess }: ManualPayme
 
         <button
           type="submit"
-          disabled={isSubmitting || !receiptUrl}
+          disabled={isSubmitting || !receiptFile}
           className={`w-full py-3.5 px-4 rounded-xl font-bold text-white transition-all shadow-lg ${
-            receiptUrl && !isSubmitting
+            receiptFile && !isSubmitting
               ? 'bg-sky-600 hover:bg-sky-500 shadow-sky-600/30'
               : 'bg-slate-800 text-slate-500 cursor-not-allowed'
           }`}

@@ -1,102 +1,65 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { User } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase/client';
 
 export interface StudentUser {
-  phoneNumber: string;
-  pin: string;
+  id: string;
+  email: string;
   fullName: string;
-  enrolledCourseIds: string[];
 }
 
-const STORAGE_KEY = 'learnhub_student_session';
 const SESSION_CHANGE_EVENT = 'learnhub-student-session-change';
-let cachedSessionRaw: string | null | undefined;
-let cachedSession: StudentUser | null = null;
+let cachedUser: StudentUser | null = null;
+let initialized = false;
 
-// Demo initial students for instant testing
-const DEFAULT_STUDENTS: StudentUser[] = [
-  {
-    phoneNumber: '01011223344',
-    pin: '1234',
-    fullName: 'يوسف محمد أحمد',
-    enrolledCourseIds: ['course-phy-101'],
-  },
-  {
-    phoneNumber: '01122334455',
-    pin: '5678',
-    fullName: 'نور خالد إبراهيم',
-    enrolledCourseIds: ['course-phy-101'],
-  },
-];
-
-export function getStoredStudents(): StudentUser[] {
-  if (typeof window === 'undefined') return DEFAULT_STUDENTS;
-  try {
-    const data = localStorage.getItem('learnhub_registered_students');
-    if (!data) {
-      localStorage.setItem('learnhub_registered_students', JSON.stringify(DEFAULT_STUDENTS));
-      return DEFAULT_STUDENTS;
-    }
-    return JSON.parse(data);
-  } catch {
-    return DEFAULT_STUDENTS;
-  }
-}
-
-export function saveStudentUser(student: StudentUser) {
-  if (typeof window === 'undefined') return;
-  const list = getStoredStudents();
-  const existingIdx = list.findIndex((s) => s.phoneNumber === student.phoneNumber);
-  if (existingIdx >= 0) {
-    list[existingIdx] = student;
-  } else {
-    list.push(student);
-  }
-  localStorage.setItem('learnhub_registered_students', JSON.stringify(list));
-}
-
-export function getActiveStudentSession(): StudentUser | null {
-  if (typeof window === 'undefined') return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (raw !== cachedSessionRaw) {
-    cachedSessionRaw = raw;
-    cachedSession = raw ? (JSON.parse(raw) as StudentUser) : null;
-  }
-  return cachedSession;
-}
-
-export function setActiveStudentSession(student: StudentUser | null) {
-  if (typeof window === 'undefined') return;
-  if (!student) {
-    localStorage.removeItem(STORAGE_KEY);
-  } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(student));
-  }
-  cachedSessionRaw = undefined;
-  window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
-}
-
-function subscribeToStudentSession(onChange: () => void) {
-  window.addEventListener(SESSION_CHANGE_EVENT, onChange);
-  window.addEventListener('storage', onChange);
-  return () => {
-    window.removeEventListener(SESSION_CHANGE_EVENT, onChange);
-    window.removeEventListener('storage', onChange);
+function toStudentUser(user: User | null): StudentUser | null {
+  if (!user) return null;
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    fullName: typeof user.user_metadata.full_name === 'string'
+      ? user.user_metadata.full_name
+      : user.email ?? 'Student',
   };
 }
 
-export function useStudentSession() {
-  return useSyncExternalStore(
-    subscribeToStudentSession,
-    getActiveStudentSession,
-    () => null
-  );
+function setCachedUser(user: User | null) {
+  cachedUser = toStudentUser(user);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
+  }
 }
 
-export function validateEgyptianPhone(phone: string): boolean {
-  // Accepts formats like 01012345678, 01112345678, 01212345678, 01512345678
-  const clean = phone.trim().replace(/\s+/g, '');
-  const regex = /^01[0125][0-9]{8}$/;
-  return regex.test(clean);
+function initializeAuth() {
+  if (initialized || typeof window === 'undefined') return;
+  initialized = true;
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    setCachedUser(session?.user ?? null);
+  });
+  void supabase.auth.getSession().then(({ data, error }) => {
+    if (error) {
+      console.error('Could not restore student session:', error.message);
+      setCachedUser(null);
+      return;
+    }
+    setCachedUser(data.session?.user ?? null);
+  });
+}
+
+function subscribe(onChange: () => void) {
+  initializeAuth();
+  window.addEventListener(SESSION_CHANGE_EVENT, onChange);
+  return () => window.removeEventListener(SESSION_CHANGE_EVENT, onChange);
+}
+
+export function useStudentSession() {
+  return useSyncExternalStore(subscribe, () => cachedUser, () => null);
+}
+
+export async function signOutStudent() {
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
 }
