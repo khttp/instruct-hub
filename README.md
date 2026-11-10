@@ -191,13 +191,11 @@ npm install
 
 ### Deploying database migrations
 
-The GitHub Actions workflow at [`.github/workflows/supabase-migrations.yml`](.github/workflows/supabase-migrations.yml) runs on pushes to `master` when migration files change, and can also be started manually with **Actions → Supabase migrations → Run workflow**. Add these repository Actions secrets before enabling it:
+The GitHub Actions workflow at [`.github/workflows/supabase-migrations.yml`](.github/workflows/supabase-migrations.yml) runs on pushes to `master` when migration files change, and can also be started manually with **Actions → Supabase migrations → Run workflow**. Add this repository Actions secret:
 
-* `SUPABASE_ACCESS_TOKEN`: a Supabase personal access token.
-* `SUPABASE_DB_PASSWORD`: the production project's database password.
-* `SUPABASE_PROJECT_ID`: the project reference shown in Supabase project settings.
+* `SUPABASE_DB_URL`: the production project's **Session pooler** connection string (IPv4-compatible), available in Supabase **Project Settings → Database → Connect**. Use the session pooler, not the direct connection or transaction pooler. Keep the connection string in Actions secrets; URL-encode special characters in the database password.
 
-The workflow only runs `supabase db push`; it does not run the destructive tenant reset script. Ensure the one-time baseline above is complete before the first workflow run. The one-site-per-instructor migration will safely fail if an instructor already owns multiple tenants; review and resolve that data before retrying.
+The workflow only runs `supabase db push`; it does not run the destructive tenant reset script. Ensure the one-time migration-history baseline above is complete before the first workflow run. The one-site-per-instructor migration will safely fail if an instructor already owns multiple tenants; review and resolve that data before retrying.
 
 Instructors can create, edit, publish, and delete courses in `/app`; new courses start as drafts. Students register with email/password, transfer through InstaPay or Vodafone Cash, and upload a receipt image. The receipt is stored in a private Supabase Storage bucket; instructors can review it and approve or reject the request in `/app`.
 
