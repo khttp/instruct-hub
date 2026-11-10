@@ -87,7 +87,7 @@ export default function CourseDetailsPage() {
           .maybeSingle();
         if (courseError) throw courseError;
         if (!courseData) {
-          if (!showDemoCourse()) setPageStatus('not-found');
+          setPageStatus('not-found');
           return;
         }
 
@@ -108,7 +108,7 @@ export default function CourseDetailsPage() {
       } catch (error) {
         if (!active) return;
         console.error('Could not load academy course:', error);
-        if (!showDemoCourse()) setPageStatus('error');
+        setPageStatus('error');
       }
     })();
 

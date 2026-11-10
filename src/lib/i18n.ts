@@ -162,7 +162,7 @@ export const translations: Record<Locale, Translations> = {
       titleHighlight: 'Under Your Own Name & Brand',
       description:
         'Set up your online academy in under 60 seconds. Sell video courses to your students on your private web link, provide mobile data-saving playback, and receive student payments directly to your Vodafone Cash or InstaPay.',
-      demoNotice: 'See live examples of teacher academies:',
+      demoNotice: 'Explore demo academies:',
     },
     manual: {
       badge: "Instructor's Step-by-Step Manual",
@@ -187,7 +187,7 @@ export const translations: Record<Locale, Translations> = {
           number: '03',
           title: 'Create Your Course & Upload Video Lessons',
           description:
-            'Click "New Course", set the tuition fee in EGP, and add your lecture videos. You can mark introductory lessons as "Free Preview" to attract new students.',
+            'Click "New Course", set the tuition fee in EGP, and add your lecture videos. Use "Preview course" to see the student page before publishing; unpublished drafts stay hidden from students.',
           tip: '💡 Tip: Videos feature automatic 360p data saving for students on mobile packages.',
         },
         {
@@ -333,7 +333,7 @@ export const translations: Record<Locale, Translations> = {
       titleHighlight: 'باسمك وعلامتك التجارية الخاصة',
       description:
         'أنشئ أكاديميتك وموقعك الخاص لبيع كورساتك وشروحاتك لطلابك في أقل من 60 ثانية. فيديوهات سريعة موفرة لباقة النت، مع استلام أتعابك ومصروفات الكورسات مباشرة على فودافون كاش وإنستاباي.',
-      demoNotice: 'شاهد نماذج لمواقع معلمين حقيقية تعمل الآن:',
+      demoNotice: 'استكشف نماذج تجريبية للأكاديميات:',
     },
     manual: {
       badge: 'دليل المعلم خطوة بخطوة',
@@ -358,7 +358,7 @@ export const translations: Record<Locale, Translations> = {
           number: '03',
           title: 'أنشئ كورسك وارفع محاضرات الفيديو',
           description:
-            'اضغط على "إضافة كورس"، حدد سعر الكورس بالجنيه المصري، وارفع فيديوهاتك. يمكنك جعل أول محاضرة مجانية كعينة لجذب الطلاب للاشتراك.',
+            'اضغط على "إضافة كورس"، حدد السعر وارفع المحاضرات. استخدم "معاينة الكورس" لرؤية صفحة الطالب قبل النشر؛ المسودات لا تظهر للطلاب.',
           tip: '💡 نصيحة: الفيديوهات تدعم ميزة توفير باقة النت 360p لحماية باقات موبايل الطلاب.',
         },
         {

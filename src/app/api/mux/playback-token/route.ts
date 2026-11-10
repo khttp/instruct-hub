@@ -77,18 +77,31 @@ export async function GET(request: NextRequest) {
 
   const { data: course, error: courseError } = await client
     .from('courses')
-    .select('is_published')
+    .select('is_published, tenant_id')
     .eq('id', lecture.course_id)
     .maybeSingle();
   if (courseError) {
     console.error('Could not verify video course:', courseError.message);
     return NextResponse.json({ error: 'Could not verify video access.' }, { status: 500 });
   }
-  if (!course?.is_published) {
+  let isCourseOwner = false;
+  if (userId) {
+    const { data: tenant, error: tenantError } = await client
+      .from('tenants')
+      .select('owner_id')
+      .eq('id', course?.tenant_id ?? '')
+      .maybeSingle();
+    if (tenantError) {
+      console.error('Could not verify course owner for video preview:', tenantError.message);
+      return NextResponse.json({ error: 'Could not verify video access.' }, { status: 500 });
+    }
+    isCourseOwner = tenant?.owner_id === userId;
+  }
+  if (!course || (!course.is_published && !isCourseOwner)) {
     return NextResponse.json({ error: 'This course is not available.' }, { status: 404 });
   }
 
-  if (!lecture.is_free_preview) {
+  if (!lecture.is_free_preview && !isCourseOwner) {
     if (!userId) return NextResponse.json({ error: 'Approved enrollment is required.' }, { status: 403 });
     const { data: enrollment, error: enrollmentError } = await client
       .from('enrollments')

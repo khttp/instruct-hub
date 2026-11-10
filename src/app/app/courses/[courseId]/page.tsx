@@ -3,7 +3,7 @@
 import React, { FormEvent, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Pencil, Plus, Save, Trash2, Video } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Pencil, Plus, Save, Trash2, Video } from 'lucide-react';
 import * as UpChunk from '@mux/upchunk';
 import { supabase } from '@/lib/supabase/client';
 import { Course, Lecture, Tenant } from '@/types/database';
@@ -431,13 +431,25 @@ export default function EditCoursePage() {
             <ArrowLeft className={`h-4 w-4 ${isRtl ? 'rotate-180' : ''}`} />
             {isRtl ? 'لوحة تحكم المدرس' : 'Instructor dashboard'}
           </Link>
-          <button
-            type="button"
-            onClick={() => setLocale((value) => value === 'ar' ? 'en' : 'ar')}
-            className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
-          >
-            {isRtl ? 'English' : 'العربية'}
-          </button>
+          <div className="flex items-center gap-2">
+            {tenant && (
+              <Link
+                href={`/tenants/${encodeURIComponent(tenant.subdomain)}/courses/${encodeURIComponent(courseId)}`}
+                target="_blank"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {isRtl ? 'معاينة كطالب' : 'Preview as student'}
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={() => setLocale((value) => value === 'ar' ? 'en' : 'ar')}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+            >
+              {isRtl ? 'English' : 'العربية'}
+            </button>
+          </div>
         </div>
       </header>
 

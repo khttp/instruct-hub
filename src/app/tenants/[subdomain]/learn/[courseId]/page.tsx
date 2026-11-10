@@ -7,6 +7,7 @@ import { CloudflareStreamPlayer } from '@/components/CloudflareStreamPlayer';
 import { ArrowLeft, ArrowRight, CheckCircle2, Bot, Send, Sparkles } from 'lucide-react';
 import { translations, Locale } from '@/lib/i18n';
 import { LanguageToggle } from '@/components/LanguageToggle';
+import { initialCourses, initialLectures, initialTenants } from '@/lib/data-store';
 import { useStudentSession } from '@/lib/student-auth';
 import { StudentAuthModal } from '@/components/StudentAuthModal';
 import { supabase } from '@/lib/supabase/client';
@@ -42,7 +43,23 @@ export default function StudentClassroomPage() {
           .eq('subdomain', subdomain)
           .maybeSingle();
         if (tenantError) throw tenantError;
-        if (!tenantData) throw new Error('Academy not found.');
+        if (!tenantData) {
+          const demoTenant = initialTenants[subdomain];
+          const demoCourse = initialCourses.find(
+            (item) => item.id === courseId && item.tenant_id === demoTenant?.id
+          );
+          if (!demoTenant || !demoCourse) throw new Error('Academy or course not found.');
+          const demoLectures = initialLectures.filter((lecture) => lecture.course_id === demoCourse.id);
+          if (!active) return;
+          setTenant(demoTenant);
+          setCourse(demoCourse);
+          setLectures(demoLectures);
+          setIsEnrolled(false);
+          setCurrentLecture(demoLectures.find((lecture) => lecture.is_free_preview) ?? null);
+          setLoadedKey(`${subdomain}:${courseId}:${student?.id ?? 'anonymous'}`);
+          setPageStatus('ready');
+          return;
+        }
 
         const { data: courseData, error: courseError } = await supabase
           .from('courses')

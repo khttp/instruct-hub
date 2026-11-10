@@ -30,7 +30,7 @@ import { supabase } from '@/lib/supabase/client';
 
 export default function InstructorDashboard() {
   const [locale, setLocale] = useState<Locale>('ar'); // Default Egyptian Arabic
-  const [activeTab, setActiveTab] = useState<'receipts' | 'courses'>('receipts');
+  const [activeTab, setActiveTab] = useState<'receipts' | 'courses'>('courses');
   const [baseTenant, setTenant] = useState(initialTenants['physics-pro']);
   const [dashboardStatus, setDashboardStatus] = useState<'loading' | 'signed-out' | 'no-site' | 'ready' | 'error'>('loading');
   const [dashboardError, setDashboardError] = useState('');
@@ -370,6 +370,51 @@ export default function InstructorDashboard() {
 
       {/* Main Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6">
+          <div className="mb-4">
+            <h1 className="text-xl font-bold text-white">
+              {isRtl ? 'ابدأ بإدارة كورساتك' : 'Your instructor workspace'}
+            </h1>
+            <p className="mt-1 text-sm text-slate-400">
+              {isRtl
+                ? 'أضف كورساتك ومحاضراتك، شاهد صفحة الطالب قبل النشر، ثم راجع طلبات الدفع.'
+                : 'Add courses and video lessons, preview the student experience, then review payment requests.'}
+            </p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => setActiveTab('courses')}
+              className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4 text-start hover:bg-sky-500/10"
+            >
+              <span className="block text-xs font-bold text-sky-300">{isRtl ? '١. إدارة الكورسات' : '1. Manage courses'}</span>
+              <span className="mt-1 block text-xs text-slate-400">
+                {isRtl ? 'أنشئ الكورس وارفع أو عدّل المحاضرات.' : 'Create courses and add or edit video lessons.'}
+              </span>
+            </button>
+            <Link
+              href={`/tenants/${encodeURIComponent(tenant.subdomain)}`}
+              target="_blank"
+              className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4 hover:bg-emerald-500/10"
+            >
+              <span className="block text-xs font-bold text-emerald-300">{isRtl ? '٢. معاينة موقع الطالب' : '2. Preview student site'}</span>
+              <span className="mt-1 block text-xs text-slate-400">
+                {isRtl ? 'المسودات لا تظهر للطلاب حتى نشرها.' : 'Draft courses stay hidden from students until published.'}
+              </span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => setActiveTab('receipts')}
+              className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-start hover:bg-amber-500/10"
+            >
+              <span className="block text-xs font-bold text-amber-300">{isRtl ? '٣. مراجعة طلبات الدفع' : '3. Review payments'}</span>
+              <span className="mt-1 block text-xs text-slate-400">
+                {isRtl ? 'افتح الإيصال ثم وافق على الطالب أو ارفض الطلب.' : 'Check receipts, then approve or decline enrollment requests.'}
+              </span>
+            </button>
+          </div>
+        </section>
+
         {/* NEW: Public Website Live & Student Sharing Bar */}
         <div className="bg-gradient-to-r from-sky-950/60 via-slate-900 to-indigo-950/60 border border-sky-500/30 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-start">
@@ -629,7 +674,7 @@ export default function InstructorDashboard() {
 
         {/* Tab 2: Course & Lecture Management */}
         {activeTab === 'courses' && (
-          <div className="space-y-6">
+          <div id="course-list" className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold text-white">{isRtl ? 'قائمة الكورسات والمحاضرات' : 'Courses & Video Lessons'}</h2>
@@ -746,8 +791,8 @@ export default function InstructorDashboard() {
                         className="text-sky-400 hover:underline flex items-center gap-1 font-semibold"
                       >
                         {c.is_published
-                          ? (isRtl ? 'فتح صفحة الكورس للطلاب ←' : 'Open student course page →')
-                          : (isRtl ? 'معاينة مسودة الكورس ←' : 'Preview course draft →')}
+                          ? (isRtl ? 'معاينة كطالب ←' : 'Preview as student →')
+                          : (isRtl ? 'معاينة المسودة كطالب ←' : 'Preview draft as student →')}
                       </Link>
                     </div>
                     </div>

@@ -49,7 +49,7 @@ export default function TenantPage() {
         if (!active) return;
         if (error) {
           console.error('Could not load academy storefront:', error.message);
-          if (!showDemoTenant()) setTenantStatus('error');
+          setTenantStatus('error');
           return;
         }
         if (!data) {
@@ -66,7 +66,7 @@ export default function TenantPage() {
         if (!active) return;
         if (coursesError) {
           console.error('Could not load academy courses:', coursesError.message);
-          if (!showDemoTenant()) setTenantStatus('error');
+          setTenantStatus('error');
           return;
         }
 
@@ -76,7 +76,7 @@ export default function TenantPage() {
       } catch (error) {
         if (!active) return;
         console.error('Could not load academy storefront:', error);
-        if (!showDemoTenant()) setTenantStatus('error');
+        setTenantStatus('error');
       }
     })();
 

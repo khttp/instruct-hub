@@ -294,10 +294,12 @@ export default function PlatformLandingPage() {
               {t.nav.portal}
             </Link>
             <a
-              href="#onboard"
+              href={ownedTenantSlug ? '/app' : '#onboard'}
               className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-500 transition-all shadow-lg shadow-sky-600/25"
             >
-              {t.nav.launch}
+              {ownedTenantSlug
+                ? (isRtl ? 'فتح لوحة التحكم' : 'Open instructor dashboard')
+                : t.nav.launch}
             </a>
           </div>
         </div>
@@ -542,9 +544,23 @@ export default function PlatformLandingPage() {
                   </Link>
                   <Link
                     href="/app/site"
-                    className="ms-5 mt-3 inline-flex items-center text-sm font-semibold text-emerald-400 hover:text-emerald-300"
+                    className="mt-3 inline-flex items-center text-sm font-semibold text-emerald-400 hover:text-emerald-300"
                   >
                     {isRtl ? 'تعديل الموقع' : 'Edit website'}
+                  </Link>
+                  <Link
+                    href="/app"
+                    className="ms-5 mt-3 inline-flex items-center text-sm font-semibold text-sky-400 hover:text-sky-300"
+                  >
+                    {isRtl ? 'إدارة الكورسات' : 'Manage courses'}
+                  </Link>
+                  <Link
+                    href={`/tenants/${encodeURIComponent(ownedTenantSlug)}`}
+                    target="_blank"
+                    className="ms-5 mt-3 inline-flex items-center gap-1 text-sm font-semibold text-slate-300 hover:text-white"
+                  >
+                    {isRtl ? 'معاينة الموقع كطالب' : 'Preview as student'}
+                    <ExternalLink className="h-4 w-4" />
                   </Link>
                 </div>
               )}
