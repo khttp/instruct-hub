@@ -130,13 +130,18 @@ learnhub/
 ├── postcss.config.mjs                  # Tailwind CSS v4 PostCSS compilation config
 ├── next.config.ts                      # Next.js 16 configuration
 ├── supabase/
-│   └── migrations/
-│       ├── 20261102000100_init_edtech_schema.sql
-│       ├── 20261102000200_add_tenant_owners.sql
-│       ├── 20261102000300_enforce_one_tenant_per_owner.sql
-│       ├── 20261103000100_owner_manage_courses.sql
-│       ├── 20261103000200_owner_manage_lectures.sql
-│       └── 20261103000300_mux_video_support.sql
+│   ├── migrations/
+│   │   ├── 20261102000100_init_edtech_schema.sql
+│   │   ├── 20261102000200_add_tenant_owners.sql
+│   │   ├── 20261102000300_enforce_one_tenant_per_owner.sql
+│   │   ├── 20261103000100_owner_manage_courses.sql
+│   │   ├── 20261103000200_owner_manage_lectures.sql
+│   │   ├── 20261103000300_mux_video_support.sql
+│   │   ├── 20261103000400_student_enrollment_workflow.sql
+│   │   ├── 20261103000500_remove_recursive_teacher_policies.sql
+│   │   └── 20261103000600_separate_instructor_student_accounts.sql
+│   └── scripts/
+│       └── delete_all_accounts.sql
 └── src/
     ├── proxy.ts                        # Subdomain routing proxy (Next.js 16 convention)
     ├── types/
@@ -197,9 +202,11 @@ The GitHub Actions workflow at [`.github/workflows/supabase-migrations.yml`](.gi
 
 The workflow only runs `supabase db push`; it does not run the destructive tenant reset script. Ensure the one-time migration-history baseline above is complete before the first workflow run. The one-site-per-instructor migration will safely fail if an instructor already owns multiple tenants; review and resolve that data before retrying.
 
-Instructors can create, edit, publish, and delete courses in `/app`; new courses start as drafts. Students register with email/password, transfer through InstaPay or Vodafone Cash, and upload a receipt image. The receipt is stored in a private Supabase Storage bucket; instructors can review it and approve or reject the request in `/app`.
+`supabase/scripts/delete_all_accounts.sql` is a separate, manual production reset script and is deliberately excluded from migrations and CI. It deletes every Supabase Auth user; database cascades remove profiles, instructor-owned academies, courses, lessons, and enrollments. Back up the database first and replace the script's confirmation placeholder only when you intend to erase this data. It does not delete receipt files from Supabase Storage or videos from Mux; remove those separately in their respective dashboards if desired.
 
-Instructors select videos in the LearnHub course editor; the browser uploads them directly to LearnHub's Mux account, without requiring instructors to manage a video-provider account. Configure the platform-owned `MUX_TOKEN_ID`, `MUX_TOKEN_SECRET`, `MUX_SIGNING_KEY_ID`, and `MUX_SIGNING_KEY_PRIVATE_KEY` as server-only environment variables locally and in Vercel; never expose them with a `NEXT_PUBLIC_` prefix. LearnHub is responsible for Mux billing and account limits. Apply migrations `20261103000300` and `20261103000400` along with the existing schema migrations. New Mux uploads use signed playback IDs, and LearnHub issues playback tokens only for free previews or approved enrollments. Existing public Mux playback IDs and legacy Cloudflare Stream videos are still directly accessible to anyone with their playback URL; replace or reconfigure those assets for signed playback before treating them as protected.
+Instructors create a platform account from the LearnHub home page to manage their academy. Students create a separate account from an instructor's course page to request enrollment. A Supabase Auth email belongs to one account type; an instructor must use a different email for any student account. Instructor-only and student-only screens check the account role. Students transfer through InstaPay or Vodafone Cash and upload a receipt image; receipts are stored in a private Supabase Storage bucket for instructor review and approval in `/app`.
+
+Instructors select videos in the LearnHub course editor; the browser uploads them directly to LearnHub's Mux account, without requiring instructors to manage a video-provider account. Configure the platform-owned `MUX_TOKEN_ID`, `MUX_TOKEN_SECRET`, `MUX_SIGNING_KEY_ID`, and `MUX_SIGNING_KEY_PRIVATE_KEY` as server-only environment variables locally and in Vercel; never expose them with a `NEXT_PUBLIC_` prefix. LearnHub is responsible for Mux billing and account limits. Apply migrations `20261103000300` through `20261103000600` along with the existing schema migrations. New Mux uploads use signed playback IDs, and LearnHub issues playback tokens only for free previews or approved enrollments. Existing public Mux playback IDs and legacy Cloudflare Stream videos are still directly accessible to anyone with their playback URL; replace or reconfigure those assets for signed playback before treating them as protected.
 
 Instructor onboarding requires a confirmed, signed-in Supabase Auth user. Each authenticated instructor can create at most one Basic tenant; the slug, owner, and theme are saved in Supabase and are publicly readable at `NEXT_PUBLIC_APP_URL/tenants/<slug>`. Returning instructors are shown a direct link to their existing site. Pro and Academy tenant activation remains unavailable until payment verification is integrated. Never put the Supabase service-role key in `NEXT_PUBLIC_*` variables or browser code.
 

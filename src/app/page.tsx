@@ -96,12 +96,41 @@ export default function PlatformLandingPage() {
 
   useEffect(() => {
     let active = true;
+    let profileLookupId = 0;
+    const syncInstructor = async (user: User | null) => {
+      const lookupId = ++profileLookupId;
+      if (!user) {
+        if (active) setInstructor(null);
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!active || lookupId !== profileLookupId) return;
+      if (error) {
+        setAuthError(error.message);
+        setInstructor(null);
+        return;
+      }
+      if (profile?.role === 'teacher' || profile?.role === 'organization_admin') {
+        setInstructor(user);
+      } else {
+        setInstructor(null);
+        setAuthNotice(isRtl
+          ? 'أنت مسجل الدخول بحساب طالب. استخدم حساب المدرّس لإدارة المنصة.'
+          : 'You are signed in with a student account. Use an instructor account to manage the platform.');
+      }
+    };
+
     supabase.auth.getSession().then(({ data, error }) => {
       if (error) {
         if (active) setAuthError(error.message);
         return;
       }
-      if (active) setInstructor(data.session?.user ?? null);
+      void syncInstructor(data.session?.user ?? null);
     }).catch((error: unknown) => {
       if (active) {
         setAuthError(error instanceof Error ? error.message : 'Could not load the instructor session.');
@@ -109,16 +138,19 @@ export default function PlatformLandingPage() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setInstructor(session?.user ?? null);
-      setAuthError('');
-      setAuthNotice('');
+      window.setTimeout(() => {
+        if (!active) return;
+        setAuthError('');
+        setAuthNotice('');
+        void syncInstructor(session?.user ?? null);
+      }, 0);
     });
 
     return () => {
       active = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isRtl]);
 
   const handleInstructorAuth = async () => {
     setAuthError('');
@@ -132,7 +164,11 @@ export default function PlatformLandingPage() {
     setIsAuthenticating(true);
     try {
       const result = authMode === 'sign_up'
-        ? await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword })
+        ? await supabase.auth.signUp({
+          email: authEmail.trim(),
+          password: authPassword,
+          options: { data: { account_type: 'instructor' } },
+        })
         : await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
       const emailAlreadyRegistered = authMode === 'sign_up' && (
         result.data.user?.identities?.length === 0
@@ -147,6 +183,21 @@ export default function PlatformLandingPage() {
         return;
       }
       if (result.error) throw result.error;
+      if (result.data.session && result.data.user) {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', result.data.user.id)
+          .maybeSingle();
+        if (profileError) throw profileError;
+        if (profile?.role !== 'teacher' && profile?.role !== 'organization_admin') {
+          await supabase.auth.signOut();
+          if (authMode === 'sign_in') setAuthMode('sign_up');
+          throw new Error(isRtl
+            ? 'هذا حساب طالب. استخدم حساب المدرّس لتسجيل الدخول إلى المنصة.'
+            : 'This is a student account. Use an instructor account to sign in to the platform.');
+        }
+      }
       if (!result.data.session) {
         setAuthNotice(isRtl
           ? 'تم إنشاء الحساب. أكّد بريدك الإلكتروني ثم سجّل الدخول للمتابعة.'

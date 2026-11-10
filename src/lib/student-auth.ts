@@ -13,6 +13,7 @@ export interface StudentUser {
 const SESSION_CHANGE_EVENT = 'learnhub-student-session-change';
 let cachedUser: StudentUser | null = null;
 let initialized = false;
+let profileLookupId = 0;
 
 function toStudentUser(user: User | null): StudentUser | null {
   if (!user) return null;
@@ -25,8 +26,26 @@ function toStudentUser(user: User | null): StudentUser | null {
   };
 }
 
-function setCachedUser(user: User | null) {
-  cachedUser = toStudentUser(user);
+async function setCachedUser(user: User | null) {
+  const lookupId = ++profileLookupId;
+  if (!user) {
+    cachedUser = null;
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
+    return;
+  }
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (lookupId !== profileLookupId) return;
+  if (error) {
+    console.error('Could not verify student account:', error.message);
+    cachedUser = null;
+  } else {
+    cachedUser = profile?.role === 'student' ? toStudentUser(user) : null;
+  }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(SESSION_CHANGE_EVENT));
   }
@@ -37,15 +56,17 @@ function initializeAuth() {
   initialized = true;
 
   supabase.auth.onAuthStateChange((_event, session) => {
-    setCachedUser(session?.user ?? null);
+    window.setTimeout(() => {
+      void setCachedUser(session?.user ?? null);
+    }, 0);
   });
-  void supabase.auth.getSession().then(({ data, error }) => {
+  void supabase.auth.getSession().then(async ({ data, error }) => {
     if (error) {
       console.error('Could not restore student session:', error.message);
-      setCachedUser(null);
+      await setCachedUser(null);
       return;
     }
-    setCachedUser(data.session?.user ?? null);
+    await setCachedUser(data.session?.user ?? null);
   });
 }
 

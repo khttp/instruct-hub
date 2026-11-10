@@ -48,9 +48,22 @@ export function StudentAuthModal({
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { full_name: fullName.trim() } },
+          options: { data: { full_name: fullName.trim(), account_type: 'student' } },
         });
-        if (error) throw error;
+        if (error) {
+          const message = error.message.toLowerCase();
+          if (message.includes('already registered') || message.includes('already exists')) {
+            throw new Error(isRtl
+              ? 'هذا البريد مستخدم لحساب آخر. استخدم بريداً خاصاً بالطالب أو سجّل الدخول بحساب الطالب.'
+              : 'This email is already used by another account. Use a student email or sign in with the student account.');
+          }
+          throw error;
+        }
+        if (data.user?.identities?.length === 0) {
+          throw new Error(isRtl
+            ? 'هذا البريد مستخدم لحساب آخر. استخدم بريداً خاصاً بالطالب أو سجّل الدخول بحساب الطالب.'
+            : 'This email is already used by another account. Use a student email or sign in with the student account.');
+        }
 
         if (!data.session || !data.user) {
           setNotice(isRtl
@@ -58,6 +71,19 @@ export function StudentAuthModal({
             : 'Account created. Confirm your email using the link we sent, then sign in.');
           setTab('login');
           return;
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        if (profileError) throw profileError;
+        if (profile?.role !== 'student') {
+          await supabase.auth.signOut();
+          throw new Error(isRtl
+            ? 'هذا البريد مرتبط بحساب مدرس. استخدم بريداً منفصلاً لحساب الطالب.'
+            : 'This email belongs to an instructor account. Use a separate email for the student account.');
         }
 
         onSuccess?.({
@@ -72,6 +98,18 @@ export function StudentAuthModal({
         });
         if (error) throw error;
         if (!data.user) throw new Error('Sign-in did not return a user.');
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', data.user.id)
+          .maybeSingle();
+        if (profileError) throw profileError;
+        if (profile?.role !== 'student') {
+          await supabase.auth.signOut();
+          throw new Error(isRtl
+            ? 'هذا حساب مدرس. سجّل الدخول كطالب باستخدام حساب الطالب.'
+            : 'This is an instructor account. Sign in here with your student account.');
+        }
 
         onSuccess?.({
           id: data.user.id,
@@ -113,7 +151,9 @@ export function StudentAuthModal({
           </div>
           <h3 className="text-xl font-bold text-white">{isRtl ? 'حساب الطالب' : 'Student account'}</h3>
           <p className="mt-1 text-xs text-slate-400">
-            {isRtl ? 'سجّل دخولك ببريدك الإلكتروني لمتابعة طلباتك وكورساتك.' : 'Sign in with email to track your course requests and access.'}
+            {isRtl
+              ? 'أنشئ حساباً طالبياً مستقلاً هنا. حساب المدرّس يُستخدم لإدارة المنصة فقط.'
+              : 'Create a separate student account here. Instructor accounts are only for managing the platform.'}
           </p>
         </div>
 
